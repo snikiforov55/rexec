@@ -24,8 +24,6 @@ pub struct ProcessEndpoint{
 
 type Processes = HashMap<String, ProcessEndpoint>;
 pub type ProcessResult = Result<ProcessStatus, RexecError>;
-pub type StreamRx = Receiver<String>;
-pub type StatusRx = Receiver<ProcessStatus>;
 pub type CreateRx = Receiver<ProcessCreateMessage>;
 pub type ShutdownRx = oneshot::Receiver<Shutdown>;
 
@@ -86,7 +84,6 @@ impl Broker {
                     println!("Started process {}", &create.desc.alias);
                     broker_state.create_child_process(create.desc.clone());
                     tokio::task::spawn(Process::run(create, status_tx.clone()));
-
                     ()
                 },
                 None => break,

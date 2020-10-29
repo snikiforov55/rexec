@@ -17,12 +17,4 @@ impl ProcessDescription {
                   environment: HashMap<String, String>) -> Self {
         ProcessDescription { alias, command: program, arguments, work_dir, environment}
     }
-    pub fn minimal(alias: String) -> Self {
-        ProcessDescription { alias,
-            arguments: Vec::new(),
-            work_dir: ".".to_string(),
-            environment: HashMap::new(),
-            command: "ls".to_string()
-        }
-    }
 }

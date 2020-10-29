@@ -41,7 +41,7 @@ impl Process{
                 }
             )
             .map(|stdout|{
-                let mut stdout = stdout;
+                let stdout = stdout;
                 let mut stdout_tx = create.stdout_tx;
                 let alias = create.desc.alias;
                 async move{
@@ -54,7 +54,8 @@ impl Process{
                         }
                     }
                     stdout_tx.disconnect();
-                    status_tx.send(ProcessStatusMessage{alias: alias.clone(), status: ProcessStatus::EXITED }).await;
+                    status_tx.send(ProcessStatusMessage{alias: alias.clone(),
+                        status: ProcessStatus::EXITED }).await;
                     println!("Process: Finished {}", alias);
                     Ok(())
                 }
