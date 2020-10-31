@@ -1,12 +1,16 @@
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ProcessDescription {
     pub alias: String,
-    pub command: String,
-    pub arguments: Vec<String>,
-    pub work_dir: String,
-    pub environment: HashMap<String, String>,
+    pub cmd: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default = "default_work_dir")]
+    pub cwd: String,
+    #[serde(default)]
+    pub envs: HashMap<String, String>,
 }
 
 impl ProcessDescription {
@@ -15,7 +19,17 @@ impl ProcessDescription {
                   arguments: Vec<String>,
                   work_dir: String,
                   environment: HashMap<String, String>) -> Self {
-        ProcessDescription { alias, command: program, arguments, work_dir, environment}
+        ProcessDescription {
+            alias,
+            cmd: program,
+            args: arguments,
+            cwd: work_dir,
+            envs: environment
+        }
     }
 
+}
+
+fn default_work_dir() -> String {
+    ".".to_string()
 }

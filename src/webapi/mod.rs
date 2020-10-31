@@ -1,5 +1,5 @@
 
-use hyper::{Body, Request, Response, Server, Method};
+use hyper::{Body, Request, Response, Server, Method, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -13,6 +13,7 @@ use crate::broker::Shutdown;
 use crate::process::ProcessCreateMessage;
 use crate::process::description::ProcessDescription;
 use std::collections::HashMap;
+use hyper::body::Bytes;
 
 type CreateTx=mpsc::Sender<ProcessCreateMessage>;
 type ShutdownTx = oneshot::Sender<Shutdown>;
@@ -28,17 +29,17 @@ impl WebApi{
         let (stdout_tx, stdout_rx) = mpsc::channel::<String>(8);
 
         let bytes = hyper::body::to_bytes(req.into_body()).await?;
-        let name = String::from_utf8(bytes.to_vec()).unwrap();
-        println!("Sending start command for {}", name);
-        let mut create_tx = api.create_tx.clone();
-        let res = create_tx.send(ProcessCreateMessage{
-            desc: ProcessDescription::simple(name.clone(),
-                                             name.clone(),
-                                             Vec::new(),
-                                             ".".to_string(),
-                                             HashMap::new()),
-            stdout_tx,
-        }).await;
+        let res = async move{
+            let desc = WebApi::parse_body(bytes)?;
+            println!("Sending start command for {}", &desc.alias);
+            let mut create_tx = api.create_tx.clone();
+            create_tx.send(ProcessCreateMessage{desc,stdout_tx,})
+                .await
+                .map_err(|e| RexecError::code_msg(
+                    RexecErrorType::UnexpectedEof,
+                    e.to_string())
+            )
+        }.await;
 
         match res{
             Ok(_) => Ok(
@@ -49,9 +50,23 @@ impl WebApi{
                     })))
             ),
             Err(e) => Ok(
-                Response::new(Body::from(e.to_string()))
+                hyper::Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from(e.to_string()))
+                    .unwrap()
             ),
         }
+    }
+
+    fn parse_body(bytes: Bytes) -> Result<ProcessDescription, RexecError> {
+        let body = String::from_utf8(bytes.to_vec())
+            .map_err(|e| RexecError::code_msg(
+                RexecErrorType::InvalidCreateProcessRequest,
+                e.to_string()
+            ))?;
+        let desc : ProcessDescription = serde_json::from_str(&body)
+            .map_err(|e| RexecError::code(RexecErrorType::InvalidCreateProcessRequest))?;
+        Ok(desc)
     }
     async fn root(_req: Request<Body>)->RouterResponse{
         Ok(Response::new(Body::from("root".to_string())))
@@ -91,7 +106,49 @@ mod web_api_tests{
     use super::*;
 
     #[test]
-    fn test_create_process(){
-
+    fn test_parse_body_full(){
+        let body = r#"{
+            "alias" : "test",
+            "cmd": "shell",
+            "args": [
+                "ls",
+                "arg1",
+                "arg2",
+                "arg3"
+            ],
+            "cwd": "here",
+            "envs": {
+                "PATH": "/bin",
+                "SECRET_KEY": "QWE_YUI_345_GHJ_789"
+            }
+        }"#.to_string();
+        let desc = WebApi::parse_body(hyper::body::Bytes::from(body)).unwrap();
+        assert_eq!(desc.alias, "test".to_string());
+        assert_eq!(desc.cmd, "shell".to_string());
+        assert_eq!(desc.cwd, "here".to_string());
+        assert_eq!(desc.args.len(), 4);
+        assert_eq!(desc.envs.len(), 2);
+    }
+    #[test]
+    fn test_parse_body_minimal(){
+        let body = r#"{
+            "alias" : "test",
+            "cmd": "shell"
+        }"#.to_string();
+        let desc = WebApi::parse_body(hyper::body::Bytes::from(body)).unwrap();
+        assert_eq!(desc.alias, "test".to_string());
+        assert_eq!(desc.cmd, "shell".to_string());
+        assert_eq!(desc.cwd, ".".to_string());
+        assert_eq!(desc.args.len(), 0);
+        assert_eq!(desc.envs.len(), 0);
+    }
+    #[test]
+    fn test_parse_body_failing(){
+        let body = r#"{
+            "alias" : "test"
+        }"#.to_string();
+        let desc = WebApi::parse_body(hyper::body::Bytes::from(body));
+        assert!(!desc.is_ok());
+        matches!(desc.err().unwrap().code, RexecErrorType::InvalidCreateProcessRequest);
     }
 }

@@ -7,6 +7,7 @@ use crate::process::description::ProcessDescription;
 use std::process::Stdio;
 use futures::channel::mpsc::Sender;
 use crate::error::{RexecError, RexecErrorType};
+use std::collections::HashMap;
 
 pub enum ProcessStatus {
     RUN,
@@ -30,15 +31,23 @@ pub struct Process{
 impl Process{
     pub async fn run(create: ProcessCreateMessage, mut status_tx: StatusTx) ->  Result<(),RexecError>
     {
-        let mut child = Command::new(&create.desc.command)
-            .args(&create.desc.arguments)
-            .current_dir(&create.desc.work_dir)
+        let child_res = Command::new(&create.desc.cmd)
             .stdout(Stdio::piped())
-            .spawn()
-            .map_err(|e| RexecError::code_msg(
-                RexecErrorType::FailedToExecuteProcess,
-                e.to_string()
-            ))?;
+            .args(&create.desc.args)
+            .current_dir(&create.desc.cwd)
+            .envs(&create.desc.envs)
+            .spawn();
+
+        match child_res{
+            Ok(_) => (),
+            Err(e) =>{
+                create.stdout_tx.clone().send(e.to_string()).await;
+                return Err(RexecError::code_msg(
+                    RexecErrorType::FailedToExecuteProcess,
+                    e.to_string()))
+            },
+        }
+        let mut child = child_res.unwrap();
         let stdout = child.stdout
             .take()
             .ok_or(RexecError::code_msg(
@@ -47,7 +56,7 @@ impl Process{
             ))?;
 
         let alias = create.desc.alias.clone();
-        let mut reader_out = BufReader::new(stdout).lines();
+        let reader_out = BufReader::new(stdout).lines();
 
         Process::process_stdout(create, status_tx, reader_out).await.ok();
 
