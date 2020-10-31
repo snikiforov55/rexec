@@ -16,7 +16,11 @@ use crate::config::Config;
 pub enum Shutdown{
     Shutdown,
 }
-
+pub enum BrokerExitStatus{
+    Shutdown,
+    CreateChannelFailure,
+    StatusChannelFailure,
+}
 pub struct ProcessEndpoint{
     pub desc: ProcessDescription,
     pub status: ProcessStatus,
@@ -66,7 +70,7 @@ impl Broker {
         Broker { create_rx, shutdown_rx, config }
     }
 
-    pub async fn start(self) -> Result<(), RexecError> {
+    pub async fn start(self) -> Result<BrokerExitStatus, RexecError> {
         let Broker{
             mut create_rx,
             shutdown_rx,
@@ -77,7 +81,6 @@ impl Broker {
         };
         let mut shutdown = shutdown_rx.fuse();
         let (status_tx, mut status_rx) = mpsc::channel::<ProcessStatusMessage>(config.status_size);
-
         loop{
             futures::select! {
             // Application shutdown requested
@@ -90,16 +93,16 @@ impl Broker {
                     tokio::task::spawn(Process::run(create, status_tx.clone()));
                     ()
                 },
-                None => break,
+                None => return Ok(BrokerExitStatus::CreateChannelFailure),
             },
             status = status_rx.next() => match status{
                 Some(s) => broker_state.set_status(s),
-                None => break,
+                None => return Ok(BrokerExitStatus::StatusChannelFailure),
             },
             complete => break,
             }
         }
-        Ok(())
+        Ok(BrokerExitStatus::Shutdown)
     }
 }
 
@@ -108,9 +111,47 @@ impl Broker {
 mod broker_tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
+    use crate::error::RexecErrorType;
+    use futures::SinkExt;
 
     #[test]
-    fn test_create() {
+    fn test_shutdown() {
+        let config = Config::for_addr("127.0.0.1".to_string(), 8910);
+        let (create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
+        let broker = Broker::new(create_rx, shutdown_rx, config.clone());
 
+        let job = async move{
+            let test_cycle = async move{
+                shutdown_tx.send(Shutdown::Shutdown)
+                    .map_err(|e| RexecError::code(RexecErrorType::UnexpectedEof))?;
+                Ok::<_,RexecError>(())
+            };
+            let (broker_res, _) = futures::join!(broker.start(), test_cycle);
+            matches!(broker_res.ok().unwrap(), BrokerExitStatus::Shutdown)
+        };
+        tokio::runtime::Runtime:: new()
+            .expect("Failed to create Tokio runtime")
+            .block_on(job);
+    }
+    #[test]
+    fn test_create_channel_error() {
+        let config = Config::for_addr("127.0.0.1".to_string(), 8910);
+        let (mut create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
+        let broker = Broker::new(create_rx, shutdown_rx, config.clone());
+
+        let job = async move{
+            let test_cycle = async move{
+                create_tx.close().await
+                    .map_err(|e| RexecError::code(RexecErrorType::UnexpectedEof))?;
+                Ok::<_,RexecError>(())
+            };
+            let (broker_res, _) = futures::join!(broker.start(), test_cycle);
+            matches!(broker_res.ok().unwrap(), BrokerExitStatus::CreateChannelFailure)
+        };
+        tokio::runtime::Runtime:: new()
+            .expect("Failed to create Tokio runtime")
+            .block_on(job);
     }
 }
