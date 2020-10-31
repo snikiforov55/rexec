@@ -1,7 +1,7 @@
 
 use hyper::{Body, Request, Response, Server, Method, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, IpAddr};
 use std::str::FromStr;
 use crate::error::{RexecError, RexecErrorType};
 use futures::channel::mpsc;
@@ -12,8 +12,8 @@ use std::sync::Arc;
 use crate::broker::Shutdown;
 use crate::process::ProcessCreateMessage;
 use crate::process::description::ProcessDescription;
-use std::collections::HashMap;
 use hyper::body::Bytes;
+use crate::config::Config;
 
 type CreateTx=mpsc::Sender<ProcessCreateMessage>;
 type ShutdownTx = oneshot::Sender<Shutdown>;
@@ -21,12 +21,13 @@ type ShutdownTx = oneshot::Sender<Shutdown>;
 pub struct WebApi{
     pub(crate) create_tx: CreateTx,
     pub(crate) shutdown_tx: ShutdownTx,
+    pub(crate) config: Config,
 }
 type RouterResponse = Result<Response<Body>,hyper::Error>;
 
 impl WebApi{
     async fn create_new_and_run(api:  Arc<WebApi>, req: Request<Body>) ->RouterResponse{
-        let (stdout_tx, stdout_rx) = mpsc::channel::<String>(8);
+        let (stdout_tx, stdout_rx) = mpsc::channel::<String>(api.config.stdout_size);
 
         let bytes = hyper::body::to_bytes(req.into_body()).await?;
         let res = async move{
@@ -36,7 +37,7 @@ impl WebApi{
             create_tx.send(ProcessCreateMessage{desc,stdout_tx,})
                 .await
                 .map_err(|e| RexecError::code_msg(
-                    RexecErrorType::UnexpectedEof,
+                    RexecErrorType::FailedToSendStartCommand,
                     e.to_string())
             )
         }.await;
@@ -65,19 +66,26 @@ impl WebApi{
                 e.to_string()
             ))?;
         let desc : ProcessDescription = serde_json::from_str(&body)
-            .map_err(|e| RexecError::code(RexecErrorType::InvalidCreateProcessRequest))?;
+            .map_err(|_e| RexecError::code(RexecErrorType::InvalidCreateProcessRequest))?;
         Ok(desc)
     }
     async fn root(_req: Request<Body>)->RouterResponse{
         Ok(Response::new(Body::from("root".to_string())))
     }
-    fn router<'a>(api : Arc<WebApi>, req: Request<Body>)->BoxFuture<'a,Result<Response<Body>,hyper::Error>>{
+    fn router<'a>(
+        api : Arc<WebApi>,
+        req: Request<Body>
+    )->BoxFuture<'a,Result<Response<Body>,hyper::Error>>{
         match(req.method(), req.uri().path()){
             (&Method::POST, "/process") => WebApi::create_new_and_run(api, req).boxed(),
             _ => WebApi::root(req).boxed(),
         }
     }
     pub async fn start<>(self) ->Result<(), RexecError>{
+        let ip = IpAddr::from_str(self.config.ip.as_str())
+            .map_err(|_| RexecError::code(RexecErrorType::FailedToCreateSocketAddress))?;
+        let address = SocketAddr::new(ip, self.config.port);
+
         let the_arc = Arc::new(self);
         let service   = make_service_fn(move |_| {
             let api = the_arc.clone();
@@ -88,8 +96,6 @@ impl WebApi{
                     }))
             }
         });
-        let address = SocketAddr::from_str("127.0.0.1:8910")
-            .map_err(|_| RexecError::code(RexecErrorType::FailedToCreateSocketAddress))?;
         println!("Socket address {}", address.to_string());
         Server::bind(&address)
             .serve(service)

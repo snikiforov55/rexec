@@ -7,7 +7,6 @@ use crate::process::description::ProcessDescription;
 use std::process::Stdio;
 use futures::channel::mpsc::Sender;
 use crate::error::{RexecError, RexecErrorType};
-use std::collections::HashMap;
 
 pub enum ProcessStatus {
     RUN,
@@ -29,7 +28,7 @@ pub struct Process{
 }
 
 impl Process{
-    pub async fn run(create: ProcessCreateMessage, mut status_tx: StatusTx) ->  Result<(),RexecError>
+    pub async fn run(create: ProcessCreateMessage, status_tx: StatusTx) ->  Result<(),RexecError>
     {
         let child_res = Command::new(&create.desc.cmd)
             .stdout(Stdio::piped())
@@ -41,7 +40,14 @@ impl Process{
         match child_res{
             Ok(_) => (),
             Err(e) =>{
-                create.stdout_tx.clone().send(e.to_string()).await;
+                create.stdout_tx
+                    .clone()
+                    .send(e.to_string())
+                    .await
+                    .map_err(|e| RexecError::code_msg(
+                        RexecErrorType::FailedToSendStatus,
+                        e.to_string()
+                    ))?;
                 return Err(RexecError::code_msg(
                     RexecErrorType::FailedToExecuteProcess,
                     e.to_string()))
@@ -92,7 +98,7 @@ impl Process{
             alias: alias.clone(),
             status: ProcessStatus::EXITED
         }).await.map_err(|e| RexecError::code_msg(
-            RexecErrorType::UnexpectedEof,
+            RexecErrorType::FailedToSendStatus,
             e.to_string()
         ))?;
         exit_result
@@ -174,7 +180,7 @@ mod process_tests {
                             Receiver<ProcessStatusMessage>,
                             ProcessCreateMessage,
                             Lines<BufReader<Cursor<&'a str>>>) {
-        let (stdout_tx, mut stdout_rx) = mpsc::channel::<String>(1);
+        let (stdout_tx, stdout_rx) = mpsc::channel::<String>(1);
         let (status_tx, status_rx) = mpsc::channel::<ProcessStatusMessage>(1);
 
         let desc = ProcessDescription::simple(
@@ -186,7 +192,7 @@ mod process_tests {
         );
         let create = ProcessCreateMessage { desc, stdout_tx };
         let buffer = Cursor::new("1\n2\n3\n4\n5\n6\n");
-        let mut reader_out = BufReader::new(buffer).lines();
+        let reader_out = BufReader::new(buffer).lines();
         (stdout_rx, status_tx, status_rx, create, reader_out)
     }
 }

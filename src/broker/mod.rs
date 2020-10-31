@@ -11,6 +11,7 @@ use crate::error::{RexecError};
 use crate::process::{Process, ProcessStatus, ProcessCreateMessage, ProcessStatusMessage};
 use futures::channel::mpsc::Receiver;
 use crate::process::description::ProcessDescription;
+use crate::config::Config;
 
 pub enum Shutdown{
     Shutdown,
@@ -31,6 +32,7 @@ pub type ShutdownRx = oneshot::Receiver<Shutdown>;
 pub struct Broker{
     create_rx: CreateRx,
     shutdown_rx: ShutdownRx,
+    config: Config,
 }
 struct BrokerState{
     children: Processes,
@@ -59,20 +61,22 @@ impl Broker {
     pub fn new(
         create_rx: CreateRx,
         shutdown_rx: ShutdownRx,
+        config: Config
     ) -> Self {
-        Broker { create_rx, shutdown_rx }
+        Broker { create_rx, shutdown_rx, config }
     }
 
     pub async fn start(self) -> Result<(), RexecError> {
         let Broker{
             mut create_rx,
             shutdown_rx,
+            config
         } = self;
         let mut broker_state = BrokerState{
             children: HashMap::new(),
         };
         let mut shutdown = shutdown_rx.fuse();
-        let (status_tx, status_rx) = mpsc::channel::<ProcessStatusMessage>(10);
+        let (status_tx, mut status_rx) = mpsc::channel::<ProcessStatusMessage>(config.status_size);
 
         loop{
             futures::select! {
@@ -88,6 +92,10 @@ impl Broker {
                 },
                 None => break,
             },
+            status = status_rx.next() => match status{
+                Some(s) => broker_state.set_status(s),
+                None => break,
+            },
             complete => break,
             }
         }
@@ -97,7 +105,7 @@ impl Broker {
 
 
 #[cfg(test)]
-mod process_manager_tests {
+mod broker_tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 

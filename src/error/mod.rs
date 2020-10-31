@@ -10,6 +10,7 @@ pub enum RexecErrorType{
     FailedToCreateSocketAddress,
     FailedToStartWebServer,
     FailedToSendStartCommand,
+    FailedToSendStatus,
     InvalidCreateProcessRequest,
 }
 
@@ -28,6 +29,7 @@ impl fmt::Display for RexecErrorType{
             RexecErrorType::FailedToCreateSocketAddress=>write!(f,"FailedToCreateSocketAddress"),
             RexecErrorType::FailedToStartWebServer=>write!(f,"FailedToStartWebServer"),
             RexecErrorType::FailedToSendStartCommand=>write!(f,"FailedToSendStartCommand"),
+            RexecErrorType::FailedToSendStatus=>write!(f,"FailedToSendStatus"),
             RexecErrorType::InvalidCreateProcessRequest=>write!(f,"InvalidCreateProcessRequest"),
         }
 
