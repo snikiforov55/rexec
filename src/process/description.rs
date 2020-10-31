@@ -17,4 +17,5 @@ impl ProcessDescription {
                   environment: HashMap<String, String>) -> Self {
         ProcessDescription { alias, command: program, arguments, work_dir, environment}
     }
+
 }

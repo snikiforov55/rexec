@@ -25,7 +25,7 @@ type RouterResponse = Result<Response<Body>,hyper::Error>;
 
 impl WebApi{
     async fn create_new_and_run(api:  Arc<WebApi>, req: Request<Body>) ->RouterResponse{
-        let (stdout_tx, stdout_rx) = mpsc::channel::<String>(128);
+        let (stdout_tx, stdout_rx) = mpsc::channel::<String>(8);
 
         let bytes = hyper::body::to_bytes(req.into_body()).await?;
         let name = String::from_utf8(bytes.to_vec()).unwrap();

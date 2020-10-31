@@ -5,6 +5,7 @@ use std::fmt;
 #[derive(Debug)]
 pub enum RexecErrorType{
     FailedToExecuteProcess,
+    FailedToKillProcess,
     UnexpectedEof,
     FailedToCreateSocketAddress,
     FailedToStartWebServer,
@@ -14,14 +15,15 @@ pub enum RexecErrorType{
 
 #[derive(Debug)]
 pub struct RexecError{
-    code : RexecErrorType,
-    message: String,
+    pub code : RexecErrorType,
+    pub message: String,
 }
 
 impl fmt::Display for RexecErrorType{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             RexecErrorType::FailedToExecuteProcess=> write!(f, "FailedToExecuteProcess"),
+            RexecErrorType::FailedToKillProcess=> write!(f, "FailedToKillProcess"),
             RexecErrorType::UnexpectedEof=>write!(f,"UnexpectedEof"),
             RexecErrorType::FailedToCreateSocketAddress=>write!(f,"FailedToCreateSocketAddress"),
             RexecErrorType::FailedToStartWebServer=>write!(f,"FailedToStartWebServer"),
