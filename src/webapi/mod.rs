@@ -10,13 +10,14 @@ use futures::{SinkExt, FutureExt, StreamExt};
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use crate::broker::Shutdown;
-use crate::process::ProcessCreateMessage;
+use crate::process::{ProcessCreateMessage, StartConfirmation};
 use crate::process::description::ProcessDescription;
 use hyper::body::Bytes;
 use crate::config::Config;
 
 type CreateTx=mpsc::Sender<ProcessCreateMessage>;
 type ShutdownTx = oneshot::Sender<Shutdown>;
+
 
 pub struct WebApi{
     pub(crate) create_tx: CreateTx,
@@ -33,13 +34,29 @@ impl WebApi{
         let res = async move{
             let desc = WebApi::parse_body(bytes)?;
             println!("Sending start command for {}", &desc.alias);
+
             let mut create_tx = api.create_tx.clone();
-            create_tx.send(ProcessCreateMessage{desc,stdout_tx,})
-                .await
-                .map_err(|e| RexecError::code_msg(
+            let (start_tx, start_rx) = oneshot::channel::<StartConfirmation>();
+
+            create_tx.send(ProcessCreateMessage{
+                desc,
+                stdout_tx,
+                start_tx: Some(start_tx)
+            }).await.map_err(|e| RexecError::code_msg(
                     RexecErrorType::FailedToSendStartCommand,
                     e.to_string())
-            )
+            )?;
+
+            let start_status = start_rx.await.map_err(|e| RexecError::code_msg(
+                RexecErrorType::UnexpectedEof,
+                e.to_string()))?;
+
+            match start_status{
+                StartConfirmation::Started => Ok(()),
+                StartConfirmation::Error(e) => Err(RexecError::code_msg(
+                    RexecErrorType::FailedToExecuteProcess,
+                    e.to_string())),
+            }
         }.await;
 
         match res{
@@ -50,12 +67,18 @@ impl WebApi{
                         Ok::<_, hyper::Error>(format!("{}\n",s))
                     })))
             ),
-            Err(e) => Ok(
-                hyper::Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::from(e.to_string()))
-                    .unwrap()
-            ),
+            Err(e) => {
+                let status = match e.code{
+                    RexecErrorType::FailedToExecuteProcess => StatusCode::NOT_FOUND,
+                    _ => StatusCode::INTERNAL_SERVER_ERROR,
+                };
+                Ok(
+                    hyper::Response::builder()
+                        .status(status)
+                        .body(Body::from(e.to_string()))
+                        .unwrap()
+                )
+            },
         }
     }
 

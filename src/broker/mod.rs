@@ -117,14 +117,14 @@ mod broker_tests {
     #[test]
     fn test_shutdown() {
         let config = Config::for_addr("127.0.0.1".to_string(), 8910);
-        let (create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
+        let (_create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
         let broker = Broker::new(create_rx, shutdown_rx, config.clone());
 
         let job = async move{
             let test_cycle = async move{
                 shutdown_tx.send(Shutdown::Shutdown)
-                    .map_err(|e| RexecError::code(RexecErrorType::UnexpectedEof))?;
+                    .map_err(|_| RexecError::code(RexecErrorType::UnexpectedEof))?;
                 Ok::<_,RexecError>(())
             };
             let (broker_res, _) = futures::join!(broker.start(), test_cycle);
@@ -138,13 +138,13 @@ mod broker_tests {
     fn test_create_channel_error() {
         let config = Config::for_addr("127.0.0.1".to_string(), 8910);
         let (mut create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
-        let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
+        let (_shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
         let broker = Broker::new(create_rx, shutdown_rx, config.clone());
 
         let job = async move{
             let test_cycle = async move{
                 create_tx.close().await
-                    .map_err(|e| RexecError::code(RexecErrorType::UnexpectedEof))?;
+                    .map_err(|_| RexecError::code(RexecErrorType::UnexpectedEof))?;
                 Ok::<_,RexecError>(())
             };
             let (broker_res, _) = futures::join!(broker.start(), test_cycle);
