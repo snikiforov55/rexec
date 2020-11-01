@@ -11,7 +11,7 @@ use futures::channel::oneshot;
 use futures::channel::mpsc;
 
 use crate::error::{RexecError};
-use crate::process::{Process, ProcessStatus, ProcessCreateMessage, ProcessStatusMessage, StartConfirmation};
+use crate::process::{Process, ProcessStatus, ProcessCreateMessage, ProcessStatusMessage, StartConfirmation, StatusTx};
 use futures::channel::mpsc::Receiver;
 use crate::process::description::ProcessDescription;
 use crate::config::Config;
@@ -103,11 +103,8 @@ impl Broker {
                     if broker_state.is_running(&create.desc.alias){
                         Broker::send_reply_already_running(create);
                     }else{
-                        println!("Started process {}", &create.desc.alias);
-                        broker_state.create_child_process(create.desc.clone());
-                        tokio::task::spawn(Process::run(create, status_tx.clone()));
+                        Broker::create_child(&mut broker_state, create, status_tx.clone());
                     }
-                    ()
                 },
                 None => return Ok(BrokerExitStatus::CreateChannelFailure),
             },
@@ -121,7 +118,15 @@ impl Broker {
         Ok(BrokerExitStatus::Shutdown)
     }
     fn send_reply_already_running(mut create : ProcessCreateMessage){
-        create.start_tx.take().unwrap().send(StartConfirmation::AlreadyRunning);
+        create.start_tx.take().unwrap().send(StartConfirmation::AlreadyRunning).ok();
+    }
+    fn create_child(broker_state: &mut BrokerState,
+                    create : ProcessCreateMessage,
+                    status_tx: StatusTx
+    ){
+        println!("Started process {}", &create.desc.alias);
+        broker_state.create_child_process(create.desc.clone());
+        tokio::task::spawn(Process::run(create, status_tx));
     }
 }
 

@@ -68,7 +68,6 @@ impl WebApi{
             Ok(_) => Ok(
                 Response::new(Body::wrap_stream(
                     stdout_rx.map(|s| {
-                        println!("HTTP: {}",s);
                         Ok::<_, hyper::Error>(format!("{}\n",s))
                     })))
             ),
