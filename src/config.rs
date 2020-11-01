@@ -1,3 +1,6 @@
+/*
+ * Copyright (c) 2020. Stanislav Nikiforov
+ */
 
 #[derive(Clone)]
 pub struct Config{

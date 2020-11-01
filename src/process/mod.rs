@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2020. Stanislav Nikiforov
+ */
+
 pub(crate) mod description;
 
 use futures::{SinkExt};

@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2020. Stanislav Nikiforov
+ */
+
 use crate::broker::Broker;
 use futures::channel::{mpsc, oneshot};
 use crate::process::ProcessCreateMessage;

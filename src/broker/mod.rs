@@ -1,3 +1,6 @@
+/*
+ * Copyright (c) 2020. Stanislav Nikiforov
+ */
 
 use std::collections::HashMap;
 use std::option::Option::Some;

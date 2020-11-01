@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2020. Stanislav Nikiforov
+ */
+
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 

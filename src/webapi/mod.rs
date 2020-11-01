@@ -1,3 +1,6 @@
+/*
+ * Copyright (c) 2020. Stanislav Nikiforov
+ */
 
 use hyper::{Body, Request, Response, Server, Method, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
