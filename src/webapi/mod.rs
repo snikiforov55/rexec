@@ -59,6 +59,8 @@ impl WebApi{
                 StartConfirmation::Error(e) => Err(RexecError::code_msg(
                     RexecErrorType::FailedToExecuteProcess,
                     e.to_string())),
+                StartConfirmation::AlreadyRunning => Err(RexecError::code(
+                    RexecErrorType::FailedToExecuteProcess)),
             }
         }.await;
 
@@ -73,6 +75,7 @@ impl WebApi{
             Err(e) => {
                 let status = match e.code{
                     RexecErrorType::FailedToExecuteProcess => StatusCode::NOT_FOUND,
+                    RexecErrorType::AlreadyRunning => StatusCode::CONFLICT,
                     _ => StatusCode::INTERNAL_SERVER_ERROR,
                 };
                 Ok(

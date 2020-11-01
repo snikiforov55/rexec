@@ -21,6 +21,7 @@ pub enum ProcessStatus {
 pub enum StartConfirmation{
     Started,
     Error(String),
+    AlreadyRunning,
 }
 pub struct ProcessStatusMessage{
     pub(crate) alias: String,

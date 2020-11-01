@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2020. Stanislav Nikiforov
  */
+#![recursion_limit="256"]
 
 use crate::broker::Broker;
 use futures::channel::{mpsc, oneshot};

@@ -11,7 +11,7 @@ use futures::channel::oneshot;
 use futures::channel::mpsc;
 
 use crate::error::{RexecError};
-use crate::process::{Process, ProcessStatus, ProcessCreateMessage, ProcessStatusMessage};
+use crate::process::{Process, ProcessStatus, ProcessCreateMessage, ProcessStatusMessage, StartConfirmation};
 use futures::channel::mpsc::Receiver;
 use crate::process::description::ProcessDescription;
 use crate::config::Config;
@@ -62,6 +62,15 @@ impl BrokerState{
                 }
             );
     }
+    fn is_running(&self, alias : &String) -> bool{
+        self.children
+            .get(alias)
+            .map(|p| match p.status{
+                ProcessStatus::RUN => return true,
+                _ => return false,
+            });
+        return false
+    }
 }
 
 impl Broker {
@@ -91,9 +100,13 @@ impl Broker {
             // Process create command
             msg = create_rx.next() => match msg {
                 Some(create) => {
-                    println!("Started process {}", &create.desc.alias);
-                    broker_state.create_child_process(create.desc.clone());
-                    tokio::task::spawn(Process::run(create, status_tx.clone()));
+                    if broker_state.is_running(&create.desc.alias){
+                        Broker::send_reply_already_running(create);
+                    }else{
+                        println!("Started process {}", &create.desc.alias);
+                        broker_state.create_child_process(create.desc.clone());
+                        tokio::task::spawn(Process::run(create, status_tx.clone()));
+                    }
                     ()
                 },
                 None => return Ok(BrokerExitStatus::CreateChannelFailure),
@@ -106,6 +119,9 @@ impl Broker {
             }
         }
         Ok(BrokerExitStatus::Shutdown)
+    }
+    fn send_reply_already_running(mut create : ProcessCreateMessage){
+        create.start_tx.take().unwrap().send(StartConfirmation::AlreadyRunning);
     }
 }
 
@@ -139,6 +155,26 @@ mod broker_tests {
     }
     #[test]
     fn test_create_channel_error() {
+        let config = Config::for_addr("127.0.0.1".to_string(), 8910);
+        let (mut create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
+        let (_shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
+        let broker = Broker::new(create_rx, shutdown_rx, config.clone());
+
+        let job = async move{
+            let test_cycle = async move{
+                create_tx.close().await
+                    .map_err(|_| RexecError::code(RexecErrorType::UnexpectedEof))?;
+                Ok::<_,RexecError>(())
+            };
+            let (broker_res, _) = futures::join!(broker.start(), test_cycle);
+            matches!(broker_res.ok().unwrap(), BrokerExitStatus::CreateChannelFailure)
+        };
+        tokio::runtime::Runtime:: new()
+            .expect("Failed to create Tokio runtime")
+            .block_on(job);
+    }
+    #[test]
+    fn test_already_running() {
         let config = Config::for_addr("127.0.0.1".to_string(), 8910);
         let (mut create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
         let (_shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();

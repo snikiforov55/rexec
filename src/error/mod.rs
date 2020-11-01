@@ -15,6 +15,7 @@ pub enum RexecErrorType{
     FailedToSendStartCommand,
     FailedToSendStatus,
     InvalidCreateProcessRequest,
+    AlreadyRunning,
 }
 
 #[derive(Debug)]
@@ -34,6 +35,7 @@ impl fmt::Display for RexecErrorType{
             RexecErrorType::FailedToSendStartCommand=>write!(f,"FailedToSendStartCommand"),
             RexecErrorType::FailedToSendStatus=>write!(f,"FailedToSendStatus"),
             RexecErrorType::InvalidCreateProcessRequest=>write!(f,"InvalidCreateProcessRequest"),
+            RexecErrorType::AlreadyRunning=>write!(f,"AlreadyRunning"),
         }
 
     }
