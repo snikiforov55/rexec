@@ -5,6 +5,18 @@ The stdout of the remote process is streamed to the HTTP response. The HTTP conn
 the remote process is running.
 Closing a connection will stop a remote process.
 
+## Command Line Options
+
+```
+    -i, --ip <IP_ADDRESS>              Sets the IP address to bind to. [default: 0.0.0.0]
+    -p, --port <IP_PORT>               Sets the IP port to bind to. [default: 8910]
+        --status-size <STATUS_SIZE>    Sets the size of the status message channel [default: 8]
+        --stdout-size <STDOUT_SIZE>    Sets the size of the stdout channel [default: 8]
+```
+
+
+
+
 ## Request format
 The request has a json format.
 

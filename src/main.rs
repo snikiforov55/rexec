@@ -17,7 +17,8 @@ mod broker;
 mod config;
 
 fn main() {
-    let config = Config::for_addr("127.0.0.1".to_string(), 8910);
+    // let config = Config::for_addr("127.0.0.1".to_string(), 8910);
+    let config = Config::from_env();
 
     let (create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
