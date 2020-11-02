@@ -231,7 +231,7 @@ mod web_api_tests{
         };
         tokio::runtime::Runtime:: new()
             .expect("Failed to create Tokio runtime")
-            .block_on(job);
+            .block_on(job).ok();
     }
     #[test]
     fn test_router_api(){
