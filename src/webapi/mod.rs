@@ -98,7 +98,11 @@ impl WebApi{
         Ok(desc)
     }
     async fn root(_req: Request<Body>)->RouterResponse{
-        Ok(Response::new(Body::from("root".to_string())))
+        Ok(hyper::Response::builder()
+            .status(StatusCode::NOT_IMPLEMENTED)
+            .body(Body::from("Invalid path."))
+            .unwrap()
+        )
     }
     fn router<'a>(
         api : Arc<WebApi>,
@@ -184,5 +188,82 @@ mod web_api_tests{
         let desc = WebApi::parse_body(hyper::body::Bytes::from(body));
         assert!(!desc.is_ok());
         matches!(desc.err().unwrap().code, RexecErrorType::InvalidCreateProcessRequest);
+    }
+    #[test]
+    fn test_router_non_api(){
+        let config = Config::for_addr("localhost".to_string(), 5566);
+        let (create_tx, _create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
+        let (shutdown_tx, _shutdown_rx) = oneshot::channel::<Shutdown>();
+        let api = WebApi{create_tx, shutdown_tx, config: config.clone()};
+        let api_ref = Arc::new(api);
+
+        let job = async{
+            let req = Request::builder()
+                .uri("http://localhost:5566/")
+                .body(Body::from(""))
+                .unwrap();
+            let res = WebApi::router(api_ref.clone(),req).await.unwrap();
+            matches!(res.status(), StatusCode::NOT_IMPLEMENTED);
+            let req = Request::builder()
+                .uri("http://localhost:5566/process/1234")
+                .body(Body::from(""))
+                .unwrap();
+            let res = WebApi::router(api_ref.clone(),req).await.unwrap();
+            matches!(res.status(), StatusCode::NOT_IMPLEMENTED);
+
+            let req = Request::builder()
+                .uri("http://localhost:5566/process/1234")
+                .method("POST")
+                .body(Body::from(""))
+                .unwrap();
+            let res = WebApi::router(api_ref.clone(),req).await.unwrap();
+            matches!(res.status(), StatusCode::NOT_IMPLEMENTED);
+
+            let req = Request::builder()
+                .uri("http://localhost:5566/process")
+                .method("POST")
+                .body(Body::from(""))
+                .unwrap();
+            let res = WebApi::router(api_ref.clone(),req).await.unwrap();
+            matches!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+            Ok::<_,RexecError>(())
+        };
+        tokio::runtime::Runtime:: new()
+            .expect("Failed to create Tokio runtime")
+            .block_on(job);
+    }
+    #[test]
+    fn test_router_api(){
+        let config = Config::for_addr("localhost".to_string(), 5566);
+        let (create_tx, mut create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
+        let api = WebApi{create_tx, shutdown_tx, config: config.clone()};
+        let api_ref = Arc::new(api);
+
+        let dummy_broker = async{
+            if let Some(mut msg) = create_rx.next().await{
+                msg.start_tx.take()
+                    .unwrap()
+                    .send(StartConfirmation::Started)
+                    .unwrap_or(());
+                msg.stdout_tx.disconnect();
+            }else{ () }
+
+        };
+        let job = async{
+            let req = Request::builder()
+                .uri("http://localhost:5566/process")
+                .method("POST")
+                .body(Body::from(r#"{"cmd":"ls","alias":"ls"}"#))
+                .unwrap();
+            let router = WebApi::router(api_ref.clone(),req);
+            let (res, dummy) = futures::join!(router,dummy_broker);
+
+            matches!(res.unwrap().status(), StatusCode::OK);
+        };
+        tokio::runtime::Runtime:: new()
+            .expect("Failed to create Tokio runtime")
+            .block_on(job);
     }
 }

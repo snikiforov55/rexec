@@ -20,6 +20,19 @@ Closing a connection will stop a remote process.
 ## Request format
 The request has a json format.
 
+## API url
+The API url is `/process`.
+All other url's are not supported and will return a 501 Not Implemented code.
+
+### curl test command
+```
+curl http://localhost:8910/process \
+-H "Content-Type: application/json" \
+-X POST \
+-d '{"alias":"du", "cmd":"du", "args":["-h", "-c"] }' \
+-v
+```
+
 ### alias
 Is a unique short name of the command.
 If process with the same alias is already running,
@@ -65,6 +78,10 @@ The request is equal to: `sh -c "ls -rtl"`
 ## Http Return codes
 ### 500 Internal Server Error
 Is returned if any internal error occur in the executor code itself.
+The response will contain an error text if any.
+
+### 501 Not Implemented
+Is returned if any path except the api end point was requested.
 The response will contain an error text if any.
 
 ### 404 Non Found
