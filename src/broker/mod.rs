@@ -32,7 +32,6 @@ pub struct ProcessEndpoint{
 
 
 type Processes = HashMap<String, ProcessEndpoint>;
-pub type ProcessResult = Result<ProcessStatus, RexecError>;
 pub type CreateRx = Receiver<ProcessCreateMessage>;
 pub type ShutdownRx = oneshot::Receiver<Shutdown>;
 
@@ -142,7 +141,6 @@ mod broker_tests {
     use super::*;
     use crate::error::RexecErrorType;
     use futures::SinkExt;
-    use tokio::time::Duration;
 
     #[test]
     fn test_shutdown() {
@@ -187,14 +185,14 @@ mod broker_tests {
     #[test]
     fn test_already_running() {
         let config = Config::for_addr("127.0.0.1".to_string(), 8910);
-        let (mut create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
+        let ( create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
 
         let broker = Broker::for_test(
             create_rx,
             shutdown_rx,
             config.clone(),
-            |mut create, status_tx|{
+            |mut create, _status_tx|{
                 async move{
                     create.start_tx.unwrap()
                         .send(StartConfirmation::Started).ok();
@@ -247,7 +245,7 @@ mod broker_tests {
                 shutdown_tx.send(Shutdown::Shutdown).ok();
                 res
             };
-            let (b, f, s) = futures::join!(broker.start(),first_test, second_test);
+            let (_b, f, s) = futures::join!(broker.start(),first_test, second_test);
 
             assert!(f.is_ok());
             assert!(!s.is_ok());
