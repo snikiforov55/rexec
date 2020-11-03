@@ -5,13 +5,13 @@
 pub(crate) mod description;
 
 use futures::{SinkExt};
-use tokio::io::{AsyncBufReadExt, BufReader, Lines, AsyncBufRead};
 use tokio::process::{Command};
 use crate::process::description::ProcessDescription;
 use std::process::Stdio;
 use futures::channel::mpsc::Sender;
 use crate::error::{RexecError, RexecErrorType};
 use futures::channel::oneshot;
+use tokio::io::{BufReader, AsyncBufReadExt, AsyncBufRead, Lines};
 
 pub enum ProcessStatus {
     RUN,
@@ -90,18 +90,29 @@ impl Process{
         let mut stdout_tx = create.stdout_tx;
         let alias = create.desc.alias;
         let mut exit_result = Ok(());
-        
-        while let Ok(Some(line)) = reader_out.next_line().await {
-            let res = stdout_tx.send(line).await;
-            match res{
-                Ok(_) => continue,
-                Err(_) => {
-                    exit_result = Err(RexecError::code_msg(
-                        RexecErrorType::UnexpectedEof,
-                        "Premature close of receiving channel".to_string()
-                    ));
-                    break
+
+        loop{
+            tokio::select!{
+            line = reader_out.next_line() => match line{
+                Err(_) => break,
+                Ok(Some(l)) => {
+                    let res = stdout_tx.send(l).await;
+                    match res{
+                        Ok(_) => continue,
+                        Err(_) => {
+                            exit_result = Err(RexecError::code_msg(
+                                RexecErrorType::UnexpectedEof,
+                                "Premature close of receiving channel".to_string()
+                            ));
+                            break
+                        },
+                    }
                 },
+                Ok(None) => break,
+            },
+            _ = tokio::time::delay_for(tokio::time::Duration::from_millis(500)) =>{
+                if stdout_tx.is_closed() {break}
+            },
             }
         }
         stdout_tx.disconnect();
@@ -130,6 +141,7 @@ mod process_tests {
     use std::io::Cursor;
     use futures::StreamExt;
     use futures::channel::mpsc::Receiver;
+    use std::convert::TryFrom;
 
     #[test]
     fn test_process_stdout_ok() {
@@ -190,6 +202,40 @@ mod process_tests {
             .block_on(job);
 
     }
+    struct SlowLines;
+
+    // #[test]
+    // fn test_premature_receiver_close_for_quiet_stdout() {
+    //     let job = async{
+    //         let (mut stdout_rx, status_tx, mut status_rx, _start_rx, create, reader_out) = setup_test();
+    //         let reader = Lines::try_from(SlowLines{});
+    //         let alias = create.desc.alias.clone();
+    //         let process = Process::process_stdout(create,status_tx,reader_out);
+    //         let reader = async move{
+    //             let mut line = stdout_rx.next().await.unwrap();
+    //             println!("{}",line);
+    //             line = stdout_rx.next().await.unwrap();
+    //             println!("{}",line);
+    //
+    //             Ok::<_,RexecError>(())
+    //         };
+    //         let status = async move{
+    //             let status = status_rx.next().await.unwrap();
+    //             Ok::<_,RexecError>(status)
+    //         };
+    //         let (p, r, s) = futures::join!(process, reader,status);
+    //         assert!(!p.is_ok());
+    //         matches!(p.err().unwrap().code, RexecErrorType::UnexpectedEof);
+    //         assert!(r.is_ok());
+    //         let status_msg = s.unwrap();
+    //         matches!(status_msg.status, ProcessStatus::EXITED);
+    //         assert_eq!(status_msg.alias, alias);
+    //     };
+    //     tokio::runtime::Runtime:: new()
+    //         .expect("Failed to create Tokio runtime")
+    //         .block_on(job);
+    //
+    // }
 
     fn setup_test<'a>() -> (Receiver<String>,
                             Sender<ProcessStatusMessage>,
