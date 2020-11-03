@@ -60,7 +60,7 @@ impl WebApi{
                     RexecErrorType::FailedToExecuteProcess,
                     e.to_string())),
                 StartConfirmation::AlreadyRunning => Err(RexecError::code(
-                    RexecErrorType::FailedToExecuteProcess)),
+                    RexecErrorType::AlreadyRunning)),
             }
         }.await;
 
@@ -237,7 +237,7 @@ mod web_api_tests{
     fn test_router_api(){
         let config = Config::for_addr("localhost".to_string(), 5566);
         let (create_tx, mut create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
-        let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
+        let (shutdown_tx, _shutdown_rx) = oneshot::channel::<Shutdown>();
         let api = WebApi{create_tx, shutdown_tx, config: config.clone()};
         let api_ref = Arc::new(api);
 
@@ -258,7 +258,7 @@ mod web_api_tests{
                 .body(Body::from(r#"{"cmd":"ls","alias":"ls"}"#))
                 .unwrap();
             let router = WebApi::router(api_ref.clone(),req);
-            let (res, dummy) = futures::join!(router,dummy_broker);
+            let (res, _dummy) = futures::join!(router,dummy_broker);
 
             matches!(res.unwrap().status(), StatusCode::OK);
         };
