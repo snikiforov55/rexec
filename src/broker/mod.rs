@@ -4,18 +4,18 @@
 
 use std::collections::HashMap;
 use std::option::Option::Some;
-
 use futures::{StreamExt};
 use futures::future::{FutureExt};
 use futures::channel::oneshot;
 use futures::channel::mpsc;
+use futures::channel::mpsc::Receiver;
+use futures_util::future::BoxFuture;
+use log::{info,debug};
 
 use crate::error::{RexecError};
 use crate::process::{Process, ProcessStatus, ProcessCreateMessage, ProcessStatusMessage, StartConfirmation, StatusTx};
-use futures::channel::mpsc::Receiver;
 use crate::process::description::ProcessDescription;
 use crate::config::Config;
-use futures_util::future::BoxFuture;
 
 pub enum Shutdown{
     Shutdown,
@@ -48,7 +48,9 @@ struct BrokerState{
 
 impl BrokerState{
     fn create_child_process(&mut self, desc: ProcessDescription) {
-        println!("Starting {} children size {}", &desc.alias, self.children.len());
+        debug!("Created process record {}. Children size {}",
+               &desc.alias, self.children.len());
+
         self.children.insert(
             desc.alias.clone(),
             ProcessEndpoint { desc, status: ProcessStatus::RUN }
@@ -59,7 +61,7 @@ impl BrokerState{
             .get_mut(&res.alias)
             .map(|s| {
                 s.status = res.status;
-                println!("finished process {}", res.alias);
+                info!("Finished process {}", res.alias);
                 }
             );
     }
@@ -101,36 +103,49 @@ impl Broker {
             children: HashMap::new(),
         };
         let mut shutdown = shutdown_rx.fuse();
-        let (status_tx, mut status_rx) = mpsc::channel::<ProcessStatusMessage>(config.status_size);
+        let (status_tx, mut status_rx) =
+            mpsc::channel::<ProcessStatusMessage>(config.status_size);
         loop{
             futures::select! {
             // Application shutdown requested
-            _ = shutdown => break,
+            _ = shutdown => {
+                debug!("Exiting broker loop because of Shutdown command");
+                break
+            },
             // Process create command
             msg = create_rx.next() => match msg {
                 Some(create) => {
                     if broker_state.is_running(&create.desc.alias){
-                        println!("process already running {}", &create.desc.alias);
+                        debug!("process already running {}", &create.desc.alias);
                         Broker::send_reply_already_running(create);
                     }else{
-                        println!("Started process {}", &create.desc.alias);
+                        info!(target:"broker", "Started process {}", &create.desc.alias);
                         broker_state.create_child_process(create.desc.clone());
                         tokio::task::spawn((run_future)(create, status_tx.clone()));
                     }
                 },
-                None => return Ok(BrokerExitStatus::CreateChannelFailure),
+                None => {
+                    debug!("Exiting broker loop because of CreateChannelFailure");
+                    return Ok(BrokerExitStatus::CreateChannelFailure)
+                },
             },
             status = status_rx.next() => match status{
                 Some(s) => broker_state.set_status(s),
-                None => return Ok(BrokerExitStatus::StatusChannelFailure),
+                None => {
+                    debug!("Exiting broker loop because of StatusChannelFailure");
+                    return Ok(BrokerExitStatus::StatusChannelFailure)
+                },
             },
-            complete => break,
+            complete => {
+                   debug!("Exiting broker loop because all futures have finished");
+                   break
+                },
             }
         }
         Ok(BrokerExitStatus::Shutdown)
     }
     fn send_reply_already_running(mut create : ProcessCreateMessage){
-        create.start_tx.take().unwrap().send(StartConfirmation::AlreadyRunning).ok();
+        create.start_tx.take().map(|tx| tx.send(StartConfirmation::AlreadyRunning));
     }
 }
 

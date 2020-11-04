@@ -6,16 +6,18 @@ use hyper::{Body, Request, Response, Server, Method, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
 use std::net::{SocketAddr, IpAddr};
 use std::str::FromStr;
-use crate::error::{RexecError, RexecErrorType};
 use futures::channel::mpsc;
 use futures::channel::oneshot;
 use futures::{SinkExt, FutureExt, StreamExt};
 use futures::future::BoxFuture;
 use std::sync::Arc;
+use hyper::body::Bytes;
+use log::{info,error,debug};
+
 use crate::broker::Shutdown;
 use crate::process::{ProcessCreateMessage, StartConfirmation};
 use crate::process::description::ProcessDescription;
-use hyper::body::Bytes;
+use crate::error::{RexecError, RexecErrorType};
 use crate::config::Config;
 
 type CreateTx=mpsc::Sender<ProcessCreateMessage>;
@@ -36,7 +38,7 @@ impl WebApi{
         let bytes = hyper::body::to_bytes(req.into_body()).await?;
         let res = async move{
             let desc = WebApi::parse_body(bytes)?;
-            println!("Sending start command for {}", &desc.alias);
+            debug!("Sending start command for {}", &desc.alias);
 
             let mut create_tx = api.create_tx.clone();
             let (start_tx, start_rx) = oneshot::channel::<StartConfirmation>();
@@ -45,22 +47,34 @@ impl WebApi{
                 desc,
                 stdout_tx,
                 start_tx: Some(start_tx)
-            }).await.map_err(|e| RexecError::code_msg(
+            }).await.map_err(|e| {
+                debug!("FailedToSendStartCommand {}", &e.to_string());
+
+                RexecError::code_msg(
                     RexecErrorType::FailedToSendStartCommand,
                     e.to_string())
-            )?;
+            })?;
 
-            let start_status = start_rx.await.map_err(|e| RexecError::code_msg(
+            let start_status = start_rx.await.map_err(|e| {
+                debug!("UnexpectedEof {}", &e.to_string());
+                RexecError::code_msg(
                 RexecErrorType::UnexpectedEof,
-                e.to_string()))?;
+                e.to_string())
+            })?;
 
             match start_status{
                 StartConfirmation::Started => Ok(()),
-                StartConfirmation::Error(e) => Err(RexecError::code_msg(
-                    RexecErrorType::FailedToExecuteProcess,
-                    e.to_string())),
-                StartConfirmation::AlreadyRunning => Err(RexecError::code(
-                    RexecErrorType::AlreadyRunning)),
+                StartConfirmation::Error(e) => {
+                    debug!("FailedToExecuteProcess {}", &e.to_string());
+                    Err(RexecError::code_msg(
+                        RexecErrorType::FailedToExecuteProcess,
+                        e.to_string()))
+                },
+                StartConfirmation::AlreadyRunning => {
+                    debug!("AlreadyRunning");
+                    Err(RexecError::code(
+                        RexecErrorType::AlreadyRunning))
+                },
             }
         }.await;
 
@@ -68,6 +82,7 @@ impl WebApi{
             Ok(_) => Ok(
                 Response::new(Body::wrap_stream(
                     stdout_rx.map(|s| {
+                        debug!("{}",&s);
                         Ok::<_, hyper::Error>(format!("{}\n",s))
                     })))
             ),
@@ -77,6 +92,7 @@ impl WebApi{
                     RexecErrorType::AlreadyRunning => StatusCode::CONFLICT,
                     _ => StatusCode::INTERNAL_SERVER_ERROR,
                 };
+                debug!("Sending HTTP status {}", &status);
                 Ok(
                     hyper::Response::builder()
                         .status(status)
@@ -89,15 +105,25 @@ impl WebApi{
 
     fn parse_body(bytes: Bytes) -> Result<ProcessDescription, RexecError> {
         let body = String::from_utf8(bytes.to_vec())
-            .map_err(|e| RexecError::code_msg(
-                RexecErrorType::InvalidCreateProcessRequest,
-                e.to_string()
-            ))?;
+            .map_err(|e| {
+                debug!("Failed to read a request body to string{}", &e.to_string());
+                RexecError::code_msg(
+                    RexecErrorType::InvalidCreateProcessRequest,
+                    e.to_string()
+                )
+            })?;
+        debug!("Received body: {}",&body);
         let desc : ProcessDescription = serde_json::from_str(&body)
-            .map_err(|_e| RexecError::code(RexecErrorType::InvalidCreateProcessRequest))?;
+            .map_err(|e| {
+                info!("Failed to parse JSON from a request body {} from string. Reason {}",
+                      &body,
+                      &e.to_string());
+                RexecError::code(RexecErrorType::InvalidCreateProcessRequest)
+            })?;
         Ok(desc)
     }
-    async fn root(_req: Request<Body>)->RouterResponse{
+    async fn root(req: Request<Body>)->RouterResponse{
+        debug!("Requested URL is not processed {}", req.uri());
         Ok(hyper::Response::builder()
             .status(StatusCode::NOT_IMPLEMENTED)
             .body(Body::from("Invalid path."))
@@ -115,7 +141,11 @@ impl WebApi{
     }
     pub async fn start<>(self) ->Result<(), RexecError>{
         let ip = IpAddr::from_str(self.config.ip.as_str())
-            .map_err(|_| RexecError::code(RexecErrorType::FailedToCreateSocketAddress))?;
+            .map_err(|e| {
+                error!("FailedToCreateSocketAddress from {} reason {}",
+                       self.config.ip, e.to_string());
+                RexecError::code(RexecErrorType::FailedToCreateSocketAddress)
+            })?;
         let address = SocketAddr::new(ip, self.config.port);
 
         let the_arc = Arc::new(self);
@@ -128,13 +158,16 @@ impl WebApi{
                     }))
             }
         });
-        println!("Socket address {}", address.to_string());
+        info!("Starting service on {}", address.to_string());
         Server::bind(&address)
             .serve(service)
             .await
-            .map_err(|e| RexecError::code_msg(
-                RexecErrorType::FailedToStartWebServer,
-                e.to_string()))?;
+            .map_err(|e| {
+                log::error!("FailedToStartWebServer {}", &e.to_string());
+                RexecError::code_msg(
+                    RexecErrorType::FailedToStartWebServer,
+                    e.to_string())
+            })?;
         Ok(())
     }
 }

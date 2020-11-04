@@ -15,10 +15,43 @@ mod webapi;
 pub(crate) mod process;
 mod broker;
 mod config;
+use log::{info, error};
+use simplelog::*;
+use std::fs::File;
 
 fn main() {
-    // let config = Config::for_addr("127.0.0.1".to_string(), 8910);
     let config = Config::from_env();
+
+    let log_level = match config.verbosity_level{
+        2 => LevelFilter::Trace,
+        1 => LevelFilter::Debug,
+        0 => LevelFilter::Info,
+        _ => LevelFilter::Trace,
+    };
+
+    CombinedLogger::init(vec![
+        TermLogger::new(
+            log_level,
+            simplelog::Config::default(),
+            TerminalMode::Mixed
+        ).expect("No interactive terminal"),
+        WriteLogger::new(
+            log_level,
+            simplelog::Config::default(),
+            File::create("rexec.log").unwrap(),
+        ),
+    ]).unwrap();
+
+    info!("Version: {}",env!("CARGO_PKG_VERSION"));
+    info!("Starting with configuration: \
+        ip: {}, \
+        port: {}, \
+        status_size: {}, \
+        stdout_size: {}",
+          &config.ip,
+          &config.port,
+          &config.status_size,
+          &config.stdout_size);
 
     let (create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
@@ -28,12 +61,12 @@ fn main() {
     let job = async{
         let (res_broker, res_api) = futures::join!(broker.start(), api.start());
         match res_broker{
-            Ok(_)=> println!("Broker finished"),
-            Err(e) => println!("Broker finished with error {}", e.to_string()),
+            Ok(_)=> info!("Broker finished"),
+            Err(e) => error!(target:"main","Broker finished with error {}", e.to_string()),
         }
         match res_api{
-            Ok(_)=> println!("API finished"),
-            Err(e) => println!("API finished with error {}", e.to_string()),
+            Ok(_)=> info!("API finished"),
+            Err(e) => error!(target:"main","API finished with error {}", e.to_string()),
         }
     };
     tokio::runtime::Runtime:: new()

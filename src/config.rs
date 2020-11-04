@@ -10,11 +10,12 @@ pub struct Config{
     pub port: u16,
     pub status_size: usize,
     pub stdout_size: usize,
+    pub verbosity_level: usize,
 }
 
 impl Config{
     pub fn for_addr(ip: String, port: u16)->Self {
-        Config{ip, port, status_size: 10, stdout_size: 10 }
+        Config{ip, port, status_size: 10, stdout_size: 10, verbosity_level: 0 }
     }
     pub fn from_env()->Self {
         let matches = App::new("rexec")
@@ -43,13 +44,18 @@ impl Config{
                 .help("Sets the size of the stdout channel")
                 .default_value("8")
                 .takes_value(true)
+            ).arg(Arg::with_name("v")
+                .short("v")
+                .multiple(true)
+                .help("Sets the level of verbosity")
             ).get_matches();
 
         Config{
             ip: matches.value_of("IP_ADDRESS").unwrap().to_string(),
             port: matches.value_of("IP_PORT").unwrap().to_string().parse().unwrap_or(8910),
             status_size: matches.value_of("STATUS_SIZE").unwrap().parse().unwrap_or(8),
-            stdout_size: matches.value_of("STDOUT_SIZE").unwrap().parse().unwrap_or(8)
+            stdout_size: matches.value_of("STDOUT_SIZE").unwrap().parse().unwrap_or(8),
+            verbosity_level: matches.occurrences_of("v") as usize
         }
     }
 }

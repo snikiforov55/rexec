@@ -4,14 +4,16 @@
 
 pub(crate) mod description;
 
-use futures::{SinkExt};
 use tokio::process::{Command};
-use crate::process::description::ProcessDescription;
+use tokio::io::{BufReader, AsyncBufReadExt, AsyncBufRead, Lines};
 use std::process::Stdio;
 use futures::channel::mpsc::Sender;
-use crate::error::{RexecError, RexecErrorType};
 use futures::channel::oneshot;
-use tokio::io::{BufReader, AsyncBufReadExt, AsyncBufRead, Lines};
+use futures::{SinkExt};
+use log::{error,debug,info,warn};
+
+use crate::error::{RexecError, RexecErrorType};
+use crate::process::description::ProcessDescription;
 
 pub enum ProcessStatus {
     RUN,
@@ -52,16 +54,29 @@ impl Process{
             .envs(&create.desc.envs)
             .spawn();
 
-        let start_tx = create.start_tx.take().unwrap();
+        let start_tx = match create.start_tx.take(){
+            Some(tx) => tx,
+            None => {
+                error!("Empty start tx supplied \
+                    when running {}", &create.desc.alias);
+                return Err(RexecError::code(RexecErrorType::InvalidCreateProcessRequest));
+            }
+        };
         let alias = create.desc.alias.clone();
 
         match child_res.as_ref(){
             Ok(_) => start_tx.send(StartConfirmation::Started)
-                .map_err(|_| RexecError::code(RexecErrorType::FailedToSendStatus))?,
+                .map_err(|_| {
+                    debug!("FailedToSendStatus StartConfirmation::Started");
+                    RexecError::code(RexecErrorType::FailedToSendStatus)
+                })?,
             Err(e) =>{
+                info!("FailedToExecuteProcess {}",&e.to_string());
+
                 start_tx.send(StartConfirmation::Error(e.to_string()))
                     .map_err(|_| RexecError::code(RexecErrorType::FailedToSendStatus))?;
                 Process::send_status(status_tx.clone(), alias).await?;
+
                 return Err(RexecError::code(RexecErrorType::FailedToExecuteProcess))
             },
         }
@@ -69,17 +84,23 @@ impl Process{
         let mut child = child_res.unwrap();
         let stdout = child.stdout
             .take()
-            .ok_or(RexecError::code_msg(
+            .ok_or_else(||{
+                warn!("FailedToExecuteProcess. Stdout not available.");
+                RexecError::code_msg(
                 RexecErrorType::FailedToExecuteProcess,
-                "stdout not available".to_string()))?;
+                "stdout not available".to_string())
+            })?;
 
         let reader_out = BufReader::new(stdout).lines();
         Process::process_stdout(create, status_tx, reader_out).await.ok();
 
-        child.kill().map_err(|e| RexecError::code_msg(
-            RexecErrorType::FailedToKillProcess,
-            e.to_string()))?;
-        println!("Process: Finished {}", alias);
+        child.kill().map_err(|e| {
+            warn!("Failed to kill process {}", &e.to_string());
+            RexecError::code_msg(
+                RexecErrorType::FailedToKillProcess,
+                e.to_string())
+        })?;
+        info!("Process: Finished {}", alias);
         Ok(())
     }
     async fn process_stdout<T: AsyncBufRead + Unpin>(
@@ -94,12 +115,16 @@ impl Process{
         loop{
             tokio::select!{
             line = reader_out.next_line() => match line{
-                Err(_) => break,
+                Err(_) => {
+                    debug!("Failed to read next_line from child's stdout buffer.");
+                    break
+                },
                 Ok(Some(l)) => {
                     let res = stdout_tx.send(l).await;
                     match res{
                         Ok(_) => continue,
                         Err(_) => {
+                            debug!("Premature close of receiving channel.");
                             exit_result = Err(RexecError::code_msg(
                                 RexecErrorType::UnexpectedEof,
                                 "Premature close of receiving channel".to_string()
@@ -108,27 +133,32 @@ impl Process{
                         },
                     }
                 },
-                Ok(None) => break,
+                Ok(None) => {
+                    debug!("Child's stdout closed. The child process finished.");
+                    break
+                },
             },
             _ = tokio::time::delay_for(tokio::time::Duration::from_millis(500)) =>{
-                if stdout_tx.is_closed() {break}
+                if stdout_tx.is_closed() {
+                    debug!("From a timeout. Child's stdout closed. The child process finished.");
+                    break
+                }
             },
             }
         }
-        stdout_tx.disconnect();
+        stdout_tx.close_channel();
         Process::send_status(status_tx, alias).await?;
         exit_result
     }
 
-    async fn send_status(mut status_tx: StatusTx, alias: String)
-                         ->  Result<(),RexecError>{
-        status_tx.send(ProcessStatusMessage {
-            alias,
-            status: ProcessStatus::EXITED
-        }).await.map_err(|e| RexecError::code_msg(
-            RexecErrorType::FailedToSendStatus,
-            e.to_string()
-        ))
+    async fn send_status(mut status_tx: StatusTx, alias: String) ->  Result<(),RexecError>{
+        status_tx.send(ProcessStatusMessage { alias, status: ProcessStatus::EXITED })
+            .await
+            .map_err(|e|{
+                debug!("FailedToSendStatus ProcessStatus::EXITED {}", &e.to_string());
+                RexecError::code_msg(RexecErrorType::FailedToSendStatus,
+                                     e.to_string())
+            })
     }
 }
 
@@ -141,7 +171,6 @@ mod process_tests {
     use std::io::Cursor;
     use futures::StreamExt;
     use futures::channel::mpsc::Receiver;
-    use std::convert::TryFrom;
 
     #[test]
     fn test_process_stdout_ok() {
@@ -202,8 +231,7 @@ mod process_tests {
             .block_on(job);
 
     }
-    struct SlowLines;
-
+    //struct SlowLines;
     // #[test]
     // fn test_premature_receiver_close_for_quiet_stdout() {
     //     let job = async{
