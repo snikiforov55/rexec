@@ -14,7 +14,7 @@ and the asynchronous task, which consumes data provided by the child process.
 The modules communicate to each other by means of channels. 
 
 The Http request is received by the web api module in a form of the POST request
-with a JSON coded body. The web server spawns a task per request.
+with a JSON coded body. The web server spawns a Response task per request.
 
 After the body is parsed successfully, the start command is sent 
 to the Broker. The broker spawns a task for the child process.
@@ -26,7 +26,7 @@ process to the Response task.
 As soon as the child process finishes, the stdout channel is being closed 
 and the response task finishes. The Exit ProcessStatusMessage is sent to the broker.
 The Broker keeps track of running processes.
-Only ine copy of the same process can run. The unique identifier of the process
+Only one copy of the same process can run. The unique identifier of the process
 is defined by the alias field in the request.
 
 If the calling process breaks a connection, the child process is killed.
