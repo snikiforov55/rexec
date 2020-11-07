@@ -70,6 +70,7 @@ The basic block diagram is shown below.
     -p, --port <IP_PORT>               Sets the IP port to bind to. [default: 8910]
         --status-size <STATUS_SIZE>    Sets the size of the status message channel [default: 8]
         --stdout-size <STDOUT_SIZE>    Sets the size of the stdout channel [default: 8]
+    -v                                 Sets the level of verbosity (default is Info, -v is Debug, -vv is Trace )
 ```
 
 
