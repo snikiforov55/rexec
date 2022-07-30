@@ -4,12 +4,12 @@
 
 pub(crate) mod description;
 
-use tokio::process::{Command};
+use tokio::process::Command;
 use tokio::io::{BufReader, AsyncBufReadExt, AsyncBufRead, Lines};
 use std::process::Stdio;
 use futures::channel::mpsc::Sender;
 use futures::channel::oneshot;
-use futures::{SinkExt};
+use futures::SinkExt;
 use log::{error,debug,info,warn};
 
 use crate::error::{RexecError, RexecErrorType};
@@ -94,7 +94,7 @@ impl Process{
         let reader_out = BufReader::new(stdout).lines();
         Process::process_stdout(create, status_tx, reader_out).await.ok();
 
-        child.kill().map_err(|e| {
+        child.kill().await.map_err(|e| {
             warn!("Failed to kill process {}", &e.to_string());
             RexecError::code_msg(
                 RexecErrorType::FailedToKillProcess,
@@ -138,7 +138,7 @@ impl Process{
                     break
                 },
             },
-            _ = tokio::time::delay_for(tokio::time::Duration::from_millis(500)) =>{
+            _ = tokio::time::sleep(tokio::time::Duration::from_millis(500)) =>{
                 if stdout_tx.is_closed() {
                     debug!("From a timeout. Child's stdout closed. The child process finished.");
                     break

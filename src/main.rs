@@ -33,8 +33,9 @@ fn main() {
         TermLogger::new(
             log_level,
             simplelog::Config::default(),
-            TerminalMode::Mixed
-        ).expect("No interactive terminal"),
+            TerminalMode::Mixed,
+            ColorChoice::Auto
+        ),
         WriteLogger::new(
             log_level,
             simplelog::Config::default(),

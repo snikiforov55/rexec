@@ -173,7 +173,7 @@ mod broker_tests {
             let (broker_res, _) = futures::join!(broker.start(), test_cycle);
             matches!(broker_res.ok().unwrap(), BrokerExitStatus::Shutdown)
         };
-        tokio::runtime::Runtime:: new()
+        tokio::runtime::Runtime::new()
             .expect("Failed to create Tokio runtime")
             .block_on(job);
     }
