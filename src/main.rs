@@ -22,10 +22,10 @@ use std::fs::File;
 fn main() {
     let config = Config::from_env();
 
-    let log_level = match config.verbosity_level{
-        2 => LevelFilter::Trace,
-        1 => LevelFilter::Debug,
-        0 => LevelFilter::Info,
+    let log_level = match config.verbosity_level.as_str(){
+        "Trace" => LevelFilter::Trace,
+        "Debug" => LevelFilter::Debug,
+        "Info" => LevelFilter::Info,
         _ => LevelFilter::Trace,
     };
 
