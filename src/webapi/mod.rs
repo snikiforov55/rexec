@@ -2,16 +2,21 @@
  * Copyright (c) 2020. Stanislav Nikiforov
  */
 
-use hyper::{body::Body, Request, Response, Method, StatusCode};
-use hyper::service::{make_service_fn, service_fn};
+use futures::SinkExt;
+use hyper::{body::Incoming as IncomingBody, Request, Response, Method, StatusCode};
+use hyper::body::{Buf, Bytes};
+use hyper::service::service_fn;
+use hyper_util::rt::TokioIo;
+use hyper::server::conn::http1;
+use http_body_util::{BodyExt, Full, Empty};
+
 use std::net::{SocketAddr, IpAddr};
+use tokio::net::TcpListener;
+
 use std::str::FromStr;
 use futures::channel::mpsc;
 use futures::channel::oneshot;
-use futures::{SinkExt, FutureExt, StreamExt};
-use futures::future::BoxFuture;
 use std::sync::Arc;
-use hyper::body::Bytes;
 use log::{info,error,debug};
 
 use crate::broker::Shutdown;
@@ -29,15 +34,34 @@ pub struct WebApi{
     pub(crate) shutdown_tx: ShutdownTx,
     pub(crate) config: Config,
 }
-type RouterResponse = Result<Response<Body>,hyper::Error>;
+type BoxBody = http_body_util::combinators::BoxBody<Bytes, RexecError>;
+type RouterResponse = Result<Response<BoxBody>,RexecError>;
+
+fn full<T: Into<Bytes>>(chunk: T) -> BoxBody {
+    Full::new(chunk.into())
+        .map_err(|never| match never {})
+        .boxed()
+}
 
 impl WebApi{
-    async fn create_new_and_run(api:  Arc<WebApi>, req: Request<Body>) ->RouterResponse{
+    async fn create_new_and_run<B>(api:  Arc<WebApi>, req: Request<B>) ->RouterResponse
+        where B: BodyExt
+        {
+            //type Error = dyn BodyExt::Error + std::fmt::Display ;
+
         let (stdout_tx, stdout_rx) = mpsc::channel::<String>(api.config.stdout_size);
 
-        let bytes = hyper::body::to_bytes(req.into_body()).await?;
+        //let bytes = hyper::body::to_bytes(req.into_body()).await?;
+        let bytes = req.collect().await.map_err(|e  | {
+            debug!("FailedToSendStartCommand {:#?}", &e);
+
+            RexecError::code_msg(
+                RexecErrorType::FailedToSendStartCommand,
+                e.to_string())
+        })?.aggregate();
+
         let res = async move{
-            let desc = WebApi::parse_body(bytes)?;
+            let desc = WebApi::parse_body(&mut bytes.reader())?;
             debug!("Sending start command for {}", &desc.alias);
 
             let mut create_tx = api.create_tx.clone();
@@ -80,7 +104,7 @@ impl WebApi{
 
         match res{
             Ok(_) => Ok(
-                Response::new(Body::wrap_stream(
+                Response::new(BoxBody::wrap_stream(
                     stdout_rx.map(|s| {
                         debug!("{}",&s);
                         Ok::<_, hyper::Error>(format!("{}\n",s))
@@ -96,47 +120,42 @@ impl WebApi{
                 Ok(
                     hyper::Response::builder()
                         .status(status)
-                        .body(Body::from(e.to_string()))
+                        .body(full(e.to_string()))
                         .unwrap()
                 )
             },
         }
     }
 
-    fn parse_body(bytes: Bytes) -> Result<ProcessDescription, RexecError> {
-        let body = String::from_utf8(bytes.to_vec())
+    fn parse_body<R>( bytes: &mut R) -> Result<ProcessDescription, RexecError> 
+        where R: std::io::Read{
+        //debug!("Received body: {}",body.);
+        let desc : ProcessDescription = serde_json::from_reader(&mut * bytes)
             .map_err(|e| {
-                debug!("Failed to read a request body to string{}", &e.to_string());
-                RexecError::code_msg(
-                    RexecErrorType::InvalidCreateProcessRequest,
-                    e.to_string()
-                )
-            })?;
-        debug!("Received body: {}",&body);
-        let desc : ProcessDescription = serde_json::from_str(&body)
-            .map_err(|e| {
+                let mut body = String::new();
+                bytes.read_to_string(&mut body);
                 info!("Failed to parse JSON from a request body {} from string. Reason {}",
-                      &body,
-                      &e.to_string());
+                    body,
+                    &e.to_string());
                 RexecError::code(RexecErrorType::InvalidCreateProcessRequest)
             })?;
         Ok(desc)
     }
-    async fn root(req: Request<Body>)->RouterResponse{
+    async fn root<B>(req: Request<B>)->RouterResponse{
         debug!("Requested URL is not processed {}", req.uri());
         Ok(hyper::Response::builder()
             .status(StatusCode::NOT_IMPLEMENTED)
-            .body(Body::from("Invalid path."))
+            .body(full("Invalid path."))
             .unwrap()
         )
     }
-    fn router<'a>(
+    async fn router<'a, B: hyper::body::Body>(
         api : Arc<WebApi>,
-        req: Request<Body>
-    )->BoxFuture<'a,Result<Response<Body>,hyper::Error>>{
+        req: Request<B>
+    )->RouterResponse{
         match(req.method(), req.uri().path()){
-            (&Method::POST, "/process") => WebApi::create_new_and_run(api, req).boxed(),
-            _ => WebApi::root(req).boxed(),
+            (&Method::POST, "/process") => WebApi::create_new_and_run(api, req).await,
+            _ => WebApi::root(req).await,
         }
     }
     pub async fn start<>(self) ->Result<(), RexecError>{
@@ -149,18 +168,13 @@ impl WebApi{
         let address = SocketAddr::new(ip, self.config.port);
 
         let the_arc = Arc::new(self);
-        let service   = make_service_fn(move |_| {
-            let api = the_arc.clone();
-            async move {
-                Ok::<_, hyper::Error>(
-                    service_fn(move | req: Request<Body>| {
-                        WebApi::router(api.clone(), req)
-                    }))
-            }
-        });
+        
+        // let service   =  service_fn(| req: Request<BoxBody>|
+        //     async move {
+        //         WebApi::router(api, req)
+        //     });
         info!("Starting service on {}", address.to_string());
-        Server::bind(&address)
-            .serve(service)
+        let listener = TcpListener::bind(&address)
             .await
             .map_err(|e| {
                 log::error!("FailedToStartWebServer {}", &e.to_string());
@@ -168,19 +182,56 @@ impl WebApi{
                     RexecErrorType::FailedToStartWebServer,
                     e.to_string())
             })?;
-        Ok(())
+
+        loop{
+            let (stream, _) = listener
+                .accept()
+                .await            
+                .map_err(|e| {
+                    log::error!("FailedToStartWebServer {}", &e.to_string());
+                    RexecError::code_msg(
+                        RexecErrorType::FailedToStartWebServer,
+                        e.to_string())
+                })?;
+            let io = TokioIo::new(stream);
+            let api = the_arc.clone();
+            tokio::task::spawn(async move {
+                let service = 
+                    service_fn(| req: Request<IncomingBody>| {
+                        let api2 = api.clone();
+                        async move {
+                            WebApi::router(api2, req).await
+                        }
+                    });
+                if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
+                    println!("Failed to serve connection: {:?}", err);
+                    
+                }
+            });
+        }   
+        // Server::bind(&address)
+        //     .serve(service)
+        //     .await
+        //     .map_err(|e| {
+        //         log::error!("FailedToStartWebServer {}", &e.to_string());
+        //         RexecError::code_msg(
+        //             RexecErrorType::FailedToStartWebServer,
+        //             e.to_string())
+        //     })?;
     }
 }
 
 #[cfg(test)]
 mod web_api_tests{
+    use futures::StreamExt;
+
     use super::*;
 
     #[test]
     fn test_parse_body_full(){
         let body = r#"{
             "alias" : "test",
-            "cmd": "shell",
+            "cmd": "shell",yper::body::Bytes::from(
             "args": [
                 "ls",
                 "arg1",
@@ -193,7 +244,7 @@ mod web_api_tests{
                 "SECRET_KEY": "QWE_YUI_345_GHJ_789"
             }
         }"#.to_string();
-        let desc = WebApi::parse_body(hyper::body::Bytes::from(body)).unwrap();
+        let desc = WebApi::parse_body(&mut body.as_bytes()).unwrap();
         assert_eq!(desc.alias, "test".to_string());
         assert_eq!(desc.cmd, "shell".to_string());
         assert_eq!(desc.cwd, "here".to_string());
@@ -206,7 +257,7 @@ mod web_api_tests{
             "alias" : "test",
             "cmd": "shell"
         }"#.to_string();
-        let desc = WebApi::parse_body(hyper::body::Bytes::from(body)).unwrap();
+        let desc = WebApi::parse_body(&mut body.as_bytes()).unwrap();
         assert_eq!(desc.alias, "test".to_string());
         assert_eq!(desc.cmd, "shell".to_string());
         assert_eq!(desc.cwd, ".".to_string());
@@ -218,7 +269,7 @@ mod web_api_tests{
         let body = r#"{
             "alias" : "test"
         }"#.to_string();
-        let desc = WebApi::parse_body(hyper::body::Bytes::from(body));
+        let desc = WebApi::parse_body(&mut body.as_bytes());
         assert!(!desc.is_ok());
         matches!(desc.err().unwrap().code, RexecErrorType::InvalidCreateProcessRequest);
     }
@@ -231,31 +282,30 @@ mod web_api_tests{
         let api_ref = Arc::new(api);
 
         let job = async{
-            let req = Request::builder()
-                .uri("http://localhost:5566/")
-                .body(Body::from(""))
+            let req: Request<Full<Bytes>> = Request::get("http://localhost:5566/")
+                .body(Full::from("".as_bytes()))
                 .unwrap();
             let res = WebApi::router(api_ref.clone(),req).await.unwrap();
             matches!(res.status(), StatusCode::NOT_IMPLEMENTED);
-            let req = Request::builder()
+            let req: Request<Full<Bytes>> = Request::builder()
                 .uri("http://localhost:5566/process/1234")
-                .body(Body::from(""))
+                .body(Full::from("".as_bytes()))
                 .unwrap();
             let res = WebApi::router(api_ref.clone(),req).await.unwrap();
             matches!(res.status(), StatusCode::NOT_IMPLEMENTED);
 
-            let req = Request::builder()
+            let req: Request<Full<Bytes>> = Request::builder()
                 .uri("http://localhost:5566/process/1234")
                 .method("POST")
-                .body(Body::from(""))
+                .body(Full::from("".as_bytes()))
                 .unwrap();
             let res = WebApi::router(api_ref.clone(),req).await.unwrap();
             matches!(res.status(), StatusCode::NOT_IMPLEMENTED);
 
-            let req = Request::builder()
+            let req: Request<Full<Bytes>> = Request::builder()
                 .uri("http://localhost:5566/process")
                 .method("POST")
-                .body(Body::from(""))
+                .body(Full::from("".as_bytes()))
                 .unwrap();
             let res = WebApi::router(api_ref.clone(),req).await.unwrap();
             matches!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -288,7 +338,7 @@ mod web_api_tests{
             let req = Request::builder()
                 .uri("http://localhost:5566/process")
                 .method("POST")
-                .body(Body::from(r#"{"cmd":"ls","alias":"ls"}"#))
+                .body(full(r#"{"cmd":"ls","alias":"ls"}"#))
                 .unwrap();
             let router = WebApi::router(api_ref.clone(),req);
             let (res, _dummy) = futures::join!(router,dummy_broker);
