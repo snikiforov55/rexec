@@ -57,10 +57,12 @@ fn main() {
     let (create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
     let broker = Broker::new(create_rx, shutdown_rx, config.clone());
-    let api = WebApi{create_tx, shutdown_tx, config: config.clone()};
+    //let api = WebApi{create_tx, shutdown_tx, config: config.clone()};
+    let api = webapi::create_server(&config).unwrap();
+
 
     let job = async{
-        let (res_broker, res_api) = futures::join!(broker.start(), api.start());
+        let (res_broker, res_api) = futures::join!(broker.start(), api);
         match res_broker{
             Ok(_)=> info!("Broker finished"),
             Err(e) => error!(target:"main","Broker finished with error {}", e.to_string()),
