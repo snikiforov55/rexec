@@ -16,26 +16,22 @@ use futures::channel::oneshot;
 use std::sync::Arc;
 use log::{info,error,debug};
 
-use crate::broker::Shutdown;
 use crate::config;
-use crate::process::{ProcessCreateMessage, StartConfirmation};
+use crate::process::execute::{start};
 use crate::process::description::ProcessDescription;
 use crate::error::{RexecError, RexecErrorType};
 use crate::config::Config;
 
-type CreateTx=mpsc::Sender<ProcessCreateMessage>;
-type ShutdownTx = oneshot::Sender<Shutdown>;
-
-
 pub struct WebApi{
-    pub(crate) create_tx: CreateTx,
-    pub(crate) shutdown_tx: ShutdownTx,
     pub(crate) config: Config,
 }
 
 async fn try_create_process(item: web::Json<ProcessDescription>, Path((alias,)): Path<(String,)>) ->HttpResponse{
     println!("alias {alias} for \n{:?}", item);
-    HttpResponse::Ok().body(())
+    match start(&item.into_inner()).await{
+        Ok(_) => HttpResponse::Ok().body(()),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string())
+    }
 }
 
 pub fn create_server(config: &Config)->std::io::Result<actix_web::dev::Server>{

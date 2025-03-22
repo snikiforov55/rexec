@@ -3,10 +3,7 @@
  */
 #![recursion_limit="256"]
 
-use crate::broker::Broker;
 use futures::channel::{mpsc, oneshot};
-use crate::process::ProcessCreateMessage;
-use crate::broker::Shutdown;
 use crate::webapi::WebApi;
 use crate::config::Config;
 
@@ -54,23 +51,22 @@ fn main() {
           &config.status_size,
           &config.stdout_size);
 
-    let (create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
-    let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
-    let broker = Broker::new(create_rx, shutdown_rx, config.clone());
-    //let api = WebApi{create_tx, shutdown_tx, config: config.clone()};
+    // let (create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
+    // let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
+    // let broker = Broker::new(create_rx, shutdown_rx, config.clone());
     let api = webapi::create_server(&config).unwrap();
 
-
     let job = async{
-        let (res_broker, res_api) = futures::join!(broker.start(), api);
-        match res_broker{
-            Ok(_)=> info!("Broker finished"),
-            Err(e) => error!(target:"main","Broker finished with error {}", e.to_string()),
-        }
-        match res_api{
-            Ok(_)=> info!("API finished"),
-            Err(e) => error!(target:"main","API finished with error {}", e.to_string()),
-        }
+        // let (res_broker, res_api) = futures::join!(broker.start(), api);
+        // match res_broker{
+        //     Ok(_)=> info!("Broker finished"),
+        //     Err(e) => error!(target:"main","Broker finished with error {}", e.to_string()),
+        // }
+        // match res_api{
+        //     Ok(_)=> info!("API finished"),
+        //     Err(e) => error!(target:"main","API finished with error {}", e.to_string()),
+        // }
+        api.await.ok()
     };
     tokio::runtime::Runtime:: new()
         .expect("Failed to create Tokio runtime")
