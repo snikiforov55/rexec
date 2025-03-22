@@ -1,8 +1,9 @@
-use std::process::{ ExitStatus, Stdio};
+use std::{io::Write, process::{ ExitStatus, Stdio}};
 
-use futures::{channel::oneshot, join};
+
+use futures::{channel::oneshot};
 use log::{debug, info};
-use tokio::process::{Child, ChildStdin, ChildStdout, ChildStderr, Command};
+use tokio::{io::{self, AsyncBufReadExt, BufReader}, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command}};
 
 use crate::error::{RexecError, RexecErrorType};
 
@@ -77,7 +78,7 @@ pub async fn start(create: &ProcessDescription) -> Result<Process, RexecError> {
                     stop_tx: stop_tx,
                     exit_rx: exit_rx,
                 }
-            }).ok_or({
+            }).ok_or_else(||{
                 debug!("Failed to start the process {} due to failing stdin, stdout, or stderr",alias);
                 RexecError::code(RexecErrorType::FailedToExecuteProcess)
             })
@@ -92,23 +93,53 @@ async fn signal_exit(tx : ExitTx, alias: String, err: ExitStatus){
     debug!("Process {} exited with error code {}",alias,err);
     tx.send(ExitMessage{alias: alias.clone()}).ok();
 }
-async fn write_log(){
-
+fn write_log(line: io::Result<Option<String>>, kind: &str) -> Result<(), RexecError>{
+    match line{
+        Err(_) => {
+            debug!("Failed to read next_line from child's stdout buffer.");
+            Err(RexecError { code: RexecErrorType::UnexpectedEof, message: "Stream failure".to_string() })            
+        },
+        Ok(Some(l)) => {
+            println!("{}", format!("[{kind}] {l}"));
+            std::io::stdout().flush().ok();
+            Ok(())
+        },
+        Ok(None) => {
+            debug!("Child's stdout closed. The child process finished.");
+            Err(RexecError { code: RexecErrorType::UnexpectedEof, message: "Stream closed".to_string() })            
+        },
+    }
 }
 
 async fn run_child(mut child_proc: ChildProc){
- //BufReader::new(.ok_or_else()).lines();
+    let mut stdout = BufReader::new(child_proc.stdout).lines();
+    let mut stderr = BufReader::new(child_proc.stderr).lines();
     // let file_proc = async move{};
     // let stdin_proc = async move{};
     // join!(child_proc, file_proc, stdin_proc);
-    // loop{
-
-    // }
+    loop{
+        tokio::select! {
+        o = stdout.next_line() => match write_log(o,"OUT"){
+            Err(_) => break,
+            Ok(_) => {},
+        },
+        // e = stderr.next_line() => match write_log(e,"ERR"){
+        //     Err(_) => break,
+        //     Ok(_) => {},
+        // },
+        }
+    }
+    debug!("run_child loop finished. Waiting for the process to finish.");
+    // child_proc.exit_tx.cancellation().await;
+    // child_proc.stdin.drop();
     child_proc.child.wait().await;
+    debug!("run_child completed.");
+
+
 }
 // async fn monitor_process<T: AsyncBufRead + Unpin>(
 //     create: ProcessCreateMessage,
-//     status_tx: StatusTx,
+//     status_tx: StatusTx,info
 //     mut reader_out: Lines<T>
 //     mut reader_out: Lines<T>
 // ) ->  Result<(),RexecError>{

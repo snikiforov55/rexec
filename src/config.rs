@@ -52,7 +52,7 @@ impl Config{
             port: *matches.get_one::<u16>("port").unwrap_or(&8910),
             status_size: *matches.get_one::<usize>("status-size").unwrap_or(&8),
             stdout_size: *matches.get_one::<usize>("stdout-size").unwrap_or(&8),
-            verbosity_level: matches.get_one::<String>("log-level").unwrap_or(&"info".to_string()).to_string()
+            verbosity_level: matches.get_one::<String>("log-level").unwrap_or(&"debug".to_string()).to_string()
         }
     }
 }
