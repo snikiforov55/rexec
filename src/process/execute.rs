@@ -3,7 +3,10 @@ use std::{io::Write, process::{ ExitStatus, Stdio}};
 
 use futures::{channel::oneshot};
 use log::{debug, info};
-use tokio::{io::{self, AsyncBufReadExt, BufReader}, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command}};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncRead, BufReader}, 
+    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command}
+};
 
 use crate::error::{RexecError, RexecErrorType};
 
@@ -93,46 +96,30 @@ async fn signal_exit(tx : ExitTx, alias: String, err: ExitStatus){
     debug!("Process {} exited with error code {}",alias,err);
     tx.send(ExitMessage{alias: alias.clone()}).ok();
 }
-fn write_log(line: io::Result<Option<String>>, kind: &str) -> Result<(), RexecError>{
-    match line{
-        Err(_) => {
-            debug!("Failed to read next_line from child's stdout buffer.");
-            Err(RexecError { code: RexecErrorType::UnexpectedEof, message: "Stream failure".to_string() })            
-        },
-        Ok(Some(l)) => {
-            println!("{}", format!("[{kind}] {l}"));
-            std::io::stdout().flush().ok();
+async fn write_log<T: AsyncRead+Unpin>(lines: &mut tokio::io::Lines<BufReader<T>>)-> Result<(),RexecError>{
+    match lines.next_line().await{
+        Err(e) => Err(RexecError::code_msg(RexecErrorType::UnexpectedEof, e.to_string())),
+        Ok(Some(line)) => {
+            println!("{line}");
             Ok(())
         },
-        Ok(None) => {
-            debug!("Child's stdout closed. The child process finished.");
-            Err(RexecError { code: RexecErrorType::UnexpectedEof, message: "Stream closed".to_string() })            
-        },
+        Ok(None) => Err(RexecError::code(RexecErrorType::UnexpectedEof)),
     }
 }
-
 async fn run_child(mut child_proc: ChildProc){
     let mut stdout = BufReader::new(child_proc.stdout).lines();
     let mut stderr = BufReader::new(child_proc.stderr).lines();
-    // let file_proc = async move{};
-    // let stdin_proc = async move{};
-    // join!(child_proc, file_proc, stdin_proc);
     loop{
         tokio::select! {
-        o = stdout.next_line() => match write_log(o,"OUT"){
-            Err(_) => break,
-            Ok(_) => {},
-        },
-        // e = stderr.next_line() => match write_log(e,"ERR"){
-        //     Err(_) => break,
-        //     Ok(_) => {},
-        // },
+        Ok(()) = write_log(&mut stdout) => (),
+        Ok(()) = write_log(&mut stderr) => (),
+        else => break
         }
     }
     debug!("run_child loop finished. Waiting for the process to finish.");
     // child_proc.exit_tx.cancellation().await;
     // child_proc.stdin.drop();
-    child_proc.child.wait().await;
+    child_proc.child.wait().await.ok();
     debug!("run_child completed.");
 
 
