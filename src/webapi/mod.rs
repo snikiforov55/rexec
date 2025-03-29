@@ -2,6 +2,7 @@
  * Copyright (c) 2020-2025. Stanislav Nikiforov
  */
 
+use actix_web::web::Data;
 use actix_web_lab::extract::Path;
 use actix_web::App;
 use actix_web::HttpResponse;
@@ -17,28 +18,30 @@ use std::sync::Arc;
 use log::{info,error,debug};
 
 use crate::config;
-use crate::process::execute::{start};
-use crate::process::description::ProcessDescription;
+use crate::exec::execute::{start};
+use crate::proc::description::ProcessDescription;
 use crate::error::{RexecError, RexecErrorType};
 use crate::config::Config;
+use crate::register::RegisterRef;
 
 pub struct WebApi{
     pub(crate) config: Config,
 }
 
-async fn try_create_process(item: web::Json<ProcessDescription>, Path((alias,)): Path<(String,)>) ->HttpResponse{
-    println!("alias {alias} for \n{:?}", item);
-    match start(&item.into_inner()).await{
+async fn try_create_process(reg: Data<RegisterRef>, item: web::Json<ProcessDescription>, Path((alias,)): Path<(String,)>) ->HttpResponse{
+    debug!("alias {alias} for \n{:?}", item);
+    match start(reg.get_ref(), &item.into_inner()).await{
         Ok(_) => HttpResponse::Ok().body(()),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string())
     }
 }
 
-pub fn create_server(config: &Config)->std::io::Result<actix_web::dev::Server>{
-    let out = HttpServer::new(|| {
+pub fn create_server(config: &Config, reg: RegisterRef)->std::io::Result<actix_web::dev::Server>{
+    let out = HttpServer::new(move || {
         App::new()
         // enable loggerstart
         //.wrap(middleware::Logger::default())
+        .app_data(Data::new(reg.clone()))
         .app_data(web::JsonConfig::default().limit(4096)) // <- limit size of the payload (global configuration)
         .service(web::resource("/process/{alias}").route(web::post().to(try_create_process)))
         // .service(

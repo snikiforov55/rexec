@@ -4,17 +4,20 @@
 #![recursion_limit="256"]
 
 use futures::channel::{mpsc, oneshot};
-use crate::webapi::WebApi;
-use crate::config::Config;
-
-mod error;
-mod webapi;
-pub(crate) mod process;
-mod broker;
-mod config;
 use log::{info, error};
+use register::{create_register_ref};
 use simplelog::*;
 use std::fs::File;
+
+use crate::webapi::WebApi;
+use crate::config::Config;
+mod error;
+mod webapi;
+mod config;
+pub(crate) mod proc;
+pub(crate) mod exec;
+pub(crate) mod register;
+
 
 fn main() {
     let config = Config::from_env();
@@ -51,10 +54,8 @@ fn main() {
           &config.status_size,
           &config.stdout_size);
 
-    // let (create_tx, create_rx) = mpsc::channel::<ProcessCreateMessage>(10);
-    // let (shutdown_tx, shutdown_rx) = oneshot::channel::<Shutdown>();
-    // let broker = Broker::new(create_rx, shutdown_rx, config.clone());
-    let api = webapi::create_server(&config).unwrap();
+    let register = create_register_ref();
+    let api = webapi::create_server(&config,register.clone()).unwrap();
 
     let job = async{
         // let (res_broker, res_api) = futures::join!(broker.start(), api);
