@@ -87,13 +87,9 @@ async fn do_start(reg: &RegisterRef,desc: &ProcessDescription) -> Result<(), Rex
 }
 
 pub async fn start(reg: &RegisterRef,desc: &ProcessDescription) -> Result<(), RexecError> {
-    // Some more advanced request might be required.
+    // Some more advanced checks might be required.
     if reg.read().await.get(&desc.alias).is_some(){return Err(RexecError::code(RexecErrorType::AlreadyRunning))}
     do_start(reg, desc).await
-}
-async fn signal_exit(tx : ExitTx, alias: String, err: ExitStatus){
-    debug!("Process {} exited with error code {}",alias,err);
-    tx.send(ExitMessage{alias: alias.clone()}).ok();
 }
 async fn write_log<T: AsyncRead+Unpin>(lines: &mut tokio::io::Lines<BufReader<T>>, label: &str)-> Result<(),RexecError>{
     match lines.next_line().await{
@@ -121,68 +117,10 @@ async fn run_child(mut child_proc: ChildProc){
     child_proc.child.wait().await.ok();
     debug!("run_child completed.");
     child_proc.reg.write().await.remove(&child_proc.alias);
-
+    // Notify all users that the process has exited.
+    // May be needed for monitoring users.
+    child_proc.exit_tx.send(ExitMessage{alias:child_proc.alias}).ok();
 }
-// async fn monitor_process<T: AsyncBufRead + Unpin>(
-//     create: ProcessCreateMessage,
-//     status_tx: StatusTx,info
-//     mut reader_out: Lines<T>
-//     mut reader_out: Lines<T>
-// ) ->  Result<(),RexecError>{
-//     let mut stdout_tx = create.stdout_tx;
-//     let alias = create.desc.alias;
-//     let mut exit_result = Ok(());
-
-//     loop{
-//         tokio::select!{
-//         line = reader_out.next_line() => match line{
-//             Err(_) => {
-//                 debug!("Failed to read next_line from child's stdout buffer.");
-//                 break
-//             },
-//             Ok(Some(l)) => {
-//                 let res = stdout_tx.send(l).await;
-//                 match res{
-//                     Ok(_) => continue,
-//                     Err(_) => {
-//                         debug!("Premature close of receiving channel.");
-//                         exit_result = Err(RexecError::code_msg(
-//                             RexecErrorType::UnexpectedEof,
-//                             "Premature close of receiving channel".to_string()
-//                         ));
-//                         break
-//                     },
-//                 }
-//             },
-//             Ok(None) => {
-//                 debug!("Child's stdout closed. The child process finished.");
-//                 break
-//             },
-//         },
-//         _ = tokio::time::sleep(tokio::time::Duration::from_millis(500)) =>{
-//             if stdout_tx.is_closed() {
-//                 debug!("From a timeout. Child's stdout closed. The child process finished.");
-//                 break
-//             }
-//         },
-//         }
-//     }
-//     stdout_tx.close_channel();
-//     Process::send_status(status_tx, alias).await?;
-//     exit_result
-// }
-
-// async fn send_status(mut status_tx: StatusTx, alias: String) ->  Result<(),RexecError>{
-//     status_tx.send(ProcessStatusMessage { alias, status: ProcessStatus::EXITED })
-//         .await
-//         .map_err(|e|{
-//             debug!("FailedToSendStatus ProcessStatus::EXITED {}", &e.to_string());
-//             RexecError::code_msg(RexecErrorType::FailedToSendStatus,
-//                                  e.to_string())
-//         })
-// }
-
-
 #[cfg(test)]
 mod process_tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
