@@ -1,4 +1,5 @@
 use futures::{channel::oneshot};
+use tokio::sync::broadcast;
 
 use super::description::ProcessDescription;
 
@@ -26,6 +27,7 @@ pub struct Process{
     pub filename: String,
     pub stop_tx: StopTx,
     pub exit_rx: ExitRx,
+    pub bcst_rx: broadcast::Receiver<String>,
 }
 
 impl std::fmt::Display for Process{

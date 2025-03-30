@@ -42,7 +42,7 @@ pub fn create_server(config: &Config, reg: RegisterRef)->std::io::Result<actix_w
         // enable loggerstart
         //.wrap(middleware::Logger::default())
         .app_data(Data::new(reg.clone()))
-        .app_data(web::JsonConfig::default().limit(4096)) // <- limit size of the payload (global configuration)
+        .app_data(web::JsonConfig::default().limit(4096)) //todo. Read from the confgiuration. <- limit size of the payload (global configuration)
         .service(web::resource("/process/{alias}").route(web::post().to(try_create_process)))
         // .service(
         //     web::resource("/extractor2")
@@ -66,10 +66,10 @@ impl WebApi{
         let desc : ProcessDescription = serde_json::from_reader(&mut * bytes)
             .map_err(|e| {
                 let mut body = String::new();
-                bytes.read_to_string(&mut body);
-                info!("Failed to parse JSON from a request body {} from string. Reason {}",
-                    body,
-                    &e.to_string());
+                match bytes.read_to_string(&mut body){
+                    Ok(_) => error!("Failed to parse JSON from a request body {body} from string. Reason {e}"),
+                    Err(_) => error!("Failed to parse JSON from a request body string. Reason {e}")
+                }
                 RexecError::code(RexecErrorType::InvalidCreateProcessRequest)
             })?;
         Ok(desc)

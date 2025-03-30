@@ -7,7 +7,7 @@ use futures::channel::oneshot;
 use log::{debug, info};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader}, 
-    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command}
+    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command}, sync::broadcast
 };
 
 use crate::{error::{RexecError, RexecErrorType}, register::RegisterRef};
@@ -25,6 +25,7 @@ struct ChildProc{
     stop_rx: StopRx,
     exit_tx: ExitTx,
     reg: RegisterRef,
+    bcst_tx: broadcast::Sender<String>,
 }
 
 async fn do_start(reg: &RegisterRef,desc: &ProcessDescription) -> Result<(), RexecError>{
@@ -57,15 +58,17 @@ async fn do_start(reg: &RegisterRef,desc: &ProcessDescription) -> Result<(), Rex
                 let date = Utc::now().format("%Y%M%d-%H%M%S");
                 let filename = format!("{}-utc-{date}.log", pd.alias); 
                 let a = alias.clone();
+                let (bcst_tx, bcst_rx) = broadcast::channel::<String>(32);
                 debug!("filename {filename}");
                 tokio::task::spawn(async move {
-                    run_child(ChildProc{alias:a,child,stdin, stdout, stderr, stop_rx, exit_tx, reg: reg_ref}).await
+                    run_child(ChildProc{alias:a,child,stdin, stdout, stderr, stop_rx, exit_tx, reg: reg_ref, bcst_tx}).await
                 });
                 Process{
                     desc: pd,
                     filename: filename.to_string(),
-                    stop_tx: stop_tx,
-                    exit_rx: exit_rx,
+                    stop_tx,
+                    exit_rx,
+                    bcst_rx,
                 }
             }).ok_or_else(||{
                 debug!("Failed to start the process {} due to failing stdin, stdout, or stderr",alias);
