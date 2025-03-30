@@ -10,11 +10,12 @@ pub struct Config{
     pub status_size: usize,
     pub stdout_size: usize,
     pub verbosity_level: String,
+    pub install_dir: Option<String>,
 }
 
 impl Config{
     pub fn for_addr(ip: String, port: u16)->Self {
-        Config{ip, port, status_size: 10, stdout_size: 10, verbosity_level: "Info".to_string()}
+        Config{ip, port, status_size: 10, stdout_size: 10, verbosity_level: "Info".to_string(), install_dir: None}
     }
     pub fn from_env()->Self {
         let matches = command!("rexec")
@@ -45,6 +46,12 @@ impl Config{
                 .help("Sets the level of verbosity")
                 .required(false)
             )
+            .arg(Arg::new("install-directory")
+                .short('d')
+                .long("install-directory")
+                .help("Sets the installation directory. Default is the executable's directory.")
+                .required(false)
+            )
             .get_matches();
 
         Config{
@@ -52,7 +59,8 @@ impl Config{
             port: *matches.get_one::<u16>("port").unwrap_or(&8910),
             status_size: *matches.get_one::<usize>("status-size").unwrap_or(&8),
             stdout_size: *matches.get_one::<usize>("stdout-size").unwrap_or(&8),
-            verbosity_level: matches.get_one::<String>("log-level").unwrap_or(&"debug".to_string()).to_string()
+            verbosity_level: matches.get_one::<String>("log-level").unwrap_or(&"debug".to_string()).to_string(),
+            install_dir: matches.get_one::<String>("install-directory").map(|s| s.to_string())
         }
     }
 }
