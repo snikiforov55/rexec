@@ -10,7 +10,7 @@ use actix_web::HttpServer;
 use actix_web::web;
 
 use futures::SinkExt;
-
+use tokio::time::Duration;
 use std::str::FromStr;
 use futures::channel::mpsc;
 use futures::channel::oneshot;
@@ -18,7 +18,8 @@ use std::sync::Arc;
 use log::{info,error,debug};
 
 use crate::config;
-use crate::exec::execute::{start};
+use crate::exec::execute::start;
+use crate::proc::comm::StopMessage;
 use crate::proc::description::ProcessDescription;
 use crate::error::{RexecError, RexecErrorType};
 use crate::config::Config;
@@ -29,12 +30,38 @@ pub struct WebApi{
 }
 
 async fn try_create_process(reg: Data<RegisterRef>, item: web::Json<ProcessDescription>, Path((alias,)): Path<(String,)>) ->HttpResponse{
-    debug!("alias {alias} for \n{:?}", item);
+    debug!("POST for alias {alias} for \n{:?}", item);
     match start(reg.get_ref(), &item.into_inner()).await{
         Ok(_) => HttpResponse::Ok().body(()),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string())
     }
 }
+async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Path<(String,)>) ->HttpResponse{
+    debug!("DELETE for alias {alias}");
+
+    match reg.get_ref().write().await.get_mut(&alias){
+        Some(p) => { 
+            if p.stop_tx.is_some() {
+                // This will destroy the stop_tx oneshot channel.
+                p.stop_tx = None;
+            }
+            tokio::select!{
+                _ = &mut p.exit_rx => {
+                    debug!("Confirmed process exit via the exit channel");
+                    HttpResponse::Ok().body(())
+                }, 
+                _ = tokio::time::sleep(Duration::from_secs(25)) => {
+                    debug!("Timeout waiting for the process to exit");
+                    HttpResponse::RequestTimeout().body(())
+                }
+            }
+        },
+        None => {
+            HttpResponse::NotFound().body(())
+        }
+    }
+}
+
 
 pub fn create_server(config: &Config, reg: RegisterRef)->std::io::Result<actix_web::dev::Server>{
     let out = HttpServer::new(move || {
@@ -43,7 +70,11 @@ pub fn create_server(config: &Config, reg: RegisterRef)->std::io::Result<actix_w
         //.wrap(middleware::Logger::default())
         .app_data(Data::new(reg.clone()))
         .app_data(web::JsonConfig::default().limit(4096)) //todo. Read from the confgiuration. <- limit size of the payload (global configuration)
-        .service(web::resource("/process/{alias}").route(web::post().to(try_create_process)))
+        .service(
+            web::resource("/process/{alias}")
+                .route(web::post().to(try_create_process))
+                .route(web::delete().to(try_stop_process))
+        )
         // .service(
         //     web::resource("/extractor2")
         //         .app_data(web::JsonConfig::default().limit(1024)) // <- limit size of the payload (resource level)

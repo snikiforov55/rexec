@@ -10,7 +10,7 @@ use tokio::{
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command}, sync::broadcast
 };
 
-use crate::{error::{RexecError, RexecErrorType}, register::RegisterRef};
+use crate::{error::{RexecError, RexecErrorType}, proc::comm::ProcessStatusId, register::RegisterRef};
 
 use crate::proc::description::ProcessDescription;
 use crate::proc::comm::{Process, StopRx, ExitTx,StopMessage,ExitMessage};
@@ -26,6 +26,7 @@ struct ChildProc{
     exit_tx: ExitTx,
     reg: RegisterRef,
     bcst_tx: broadcast::Sender<String>,
+    filename: String,
 }
 
 async fn do_start(reg: &RegisterRef,desc: &ProcessDescription) -> Result<(), RexecError>{
@@ -60,16 +61,28 @@ async fn do_start(reg: &RegisterRef,desc: &ProcessDescription) -> Result<(), Rex
                 let a = alias.clone();
                 let (bcst_tx, bcst_rx) = broadcast::channel::<String>(32);
                 debug!("filename {filename}");
-                tokio::task::spawn(async move {
-                    run_child(ChildProc{alias:a,child,stdin, stdout, stderr, stop_rx, exit_tx, reg: reg_ref, bcst_tx}).await
-                });
-                Process{
+                let proc = Process{
                     desc: pd,
-                    filename: filename.to_string(),
-                    stop_tx,
+                    filename: filename.clone(),
+                    stop_tx: Some(stop_tx),
                     exit_rx,
                     bcst_rx,
-                }
+                    status: ProcessStatusId::Run,
+                };
+                tokio::task::spawn(async move {
+                    run_child(ChildProc{
+                        alias:a,
+                        child,
+                        stdin, 
+                        stdout, 
+                        stderr, 
+                        stop_rx, 
+                        exit_tx, 
+                        reg: reg_ref, 
+                        bcst_tx,
+                        filename}).await
+                });
+                proc
             }).ok_or_else(||{
                 debug!("Failed to start the process {} due to failing stdin, stdout, or stderr",alias);
                 RexecError::code(RexecErrorType::FailedToExecuteProcess)
@@ -107,22 +120,40 @@ async fn write_log<T: AsyncRead+Unpin>(lines: &mut tokio::io::Lines<BufReader<T>
 async fn run_child(mut child_proc: ChildProc){
     let mut stdout = BufReader::new(child_proc.stdout).lines();
     let mut stderr = BufReader::new(child_proc.stderr).lines();
+    let mut failed = false;
     loop{
         tokio::select! {
         Ok(()) = write_log(&mut stdout,"OUT") => (),
         Ok(()) = write_log(&mut stderr,"ERR") => (),
+        _ = &mut child_proc.stop_rx => 
+        {
+            debug!("Received the process termination via the stop_tx");
+            match child_proc.child.kill().await{
+                Ok(_) => debug!("Process {} stopped.", child_proc.alias),
+                Err(e) => {
+                    debug!("Failed to stop process {}, because {e}", child_proc.alias);
+                    child_proc
+                        .reg.write()
+                        .await
+                        .get_mut(&child_proc.alias)
+                        .map(|p|{p.status = ProcessStatusId::Failed; p});
+                    failed = true;
+                },
+            }
+            break;
+        },
         else => break
         }
     }
     debug!("run_child loop finished. Waiting for the process to finish.");
-    // child_proc.exit_tx.cancellation().await;
-    // child_proc.stdin.drop();
     child_proc.child.wait().await.ok();
-    debug!("run_child completed.");
-    child_proc.reg.write().await.remove(&child_proc.alias);
     // Notify all users that the process has exited.
-    // May be needed for monitoring users.
-    child_proc.exit_tx.send(ExitMessage{alias:child_proc.alias}).ok();
+    // May be needed for monitoring users.break
+    child_proc.exit_tx.send(ExitMessage{}).ok();
+    if !failed { 
+        child_proc.reg.write().await.remove(&child_proc.alias);
+    }
+    debug!("run_child completed.");
 }
 #[cfg(test)]
 mod process_tests {

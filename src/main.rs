@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2020. Stanislav Nikiforov
  */
-#![recursion_limit="256"]
+//#![recursion_limit="256"]
 
 use futures::channel::{mpsc, oneshot};
 use log::{info, error};

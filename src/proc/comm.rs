@@ -5,7 +5,7 @@ use super::description::ProcessDescription;
 
 #[derive(Clone)]
 pub struct Message{
-    pub alias: String
+    //pub alias: String
 }
 pub type StopMessage = Message;
 pub type ExitMessage = Message;
@@ -19,15 +19,16 @@ pub type ExitTx = oneshot::Sender<ExitMessage>;
 pub enum ProcessStatusId {
     Run,
     Exit,
-    AlreadyRunning,
+    Failed,
 }
 
 pub struct Process{
     pub desc: ProcessDescription,
     pub filename: String,
-    pub stop_tx: StopTx,
+    pub stop_tx: Option<StopTx>,
     pub exit_rx: ExitRx,
     pub bcst_rx: broadcast::Receiver<String>,
+    pub status: ProcessStatusId,
 }
 
 impl std::fmt::Display for Process{
