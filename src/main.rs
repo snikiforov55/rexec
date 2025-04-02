@@ -3,7 +3,6 @@
  */
 //#![recursion_limit="256"]
 
-use futures::channel::{mpsc, oneshot};
 use log::{info, error};
 use register::{create_register_ref};
 use simplelog::*;

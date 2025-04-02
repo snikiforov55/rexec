@@ -3,11 +3,11 @@ use std::{process::{ ExitStatus, Stdio}};
 
 use chrono::Utc;
 
-use futures::channel::oneshot;
 use log::{debug, info};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader}, 
-    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command}, sync::broadcast
+    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command}, 
+    sync::{broadcast,oneshot,mpsc}
 };
 
 use crate::{error::{RexecError, RexecErrorType}, proc::comm::ProcessStatusId, register::RegisterRef};
@@ -46,7 +46,7 @@ async fn do_start(reg: &RegisterRef,desc: &ProcessDescription) -> Result<(), Rex
     let proc = match child_res {
         Ok(mut child) => {
             let (stop_tx, stop_rx) = oneshot::channel::<StopMessage>();
-            let (exit_tx, exit_rx) = oneshot::channel::<ExitMessage>();
+            let (exit_tx, exit_rx) = mpsc::channel::<ExitMessage>(1);
 
             child.stdin.take()
                 .and_then(|i|{
@@ -65,7 +65,7 @@ async fn do_start(reg: &RegisterRef,desc: &ProcessDescription) -> Result<(), Rex
                     desc: pd,
                     filename: filename.clone(),
                     stop_tx: Some(stop_tx),
-                    exit_rx,
+                    exit_rx: Some(exit_rx),
                     bcst_rx,
                     status: ProcessStatusId::Run,
                 };
@@ -122,6 +122,19 @@ async fn run_child(mut child_proc: ChildProc){
     let mut stderr = BufReader::new(child_proc.stderr).lines();
     let mut failed = false;
     loop{
+        match child_proc.child.try_wait(){
+            Ok(Some(status)) => {
+                debug!("try_wait reports that the process is exited. {status}");
+                break
+            },
+            Err(e) => {
+                debug!("Error trywing to wait for the process. {e}");
+                break
+            }
+            Ok(None) =>{
+                debug!("Try_wait doesn't say that the process exited. The select! will be called")
+            }
+        }
         tokio::select! {
         Ok(()) = write_log(&mut stdout,"OUT") => (),
         Ok(()) = write_log(&mut stderr,"ERR") => (),
@@ -140,16 +153,22 @@ async fn run_child(mut child_proc: ChildProc){
                     failed = true;
                 },
             }
-            break;
+            break
         },
-        else => break
+        // Sometimes the process is not marked as finished, but no output will be provided.
+        // Need a timeout to exit the loop to re-check the status.
+        _ = tokio::time::sleep(tokio::time::Duration::from_millis(1000)) => continue,
+        else => {
+            debug!("select! detected the default exit condition.");
+            break
+        }
         }
     }
     debug!("run_child loop finished. Waiting for the process to finish.");
     child_proc.child.wait().await.ok();
     // Notify all users that the process has exited.
     // May be needed for monitoring users.break
-    child_proc.exit_tx.send(ExitMessage{}).ok();
+    child_proc.exit_tx.send(ExitMessage{}).await.ok();
     if !failed { 
         child_proc.reg.write().await.remove(&child_proc.alias);
     }

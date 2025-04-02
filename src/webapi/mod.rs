@@ -9,16 +9,14 @@ use actix_web::HttpResponse;
 use actix_web::HttpServer;
 use actix_web::web;
 
-use futures::SinkExt;
-use tokio::time::Duration;
+use tokio::{time::Duration, sync::{oneshot,mpsc}};
 use std::str::FromStr;
-use futures::channel::mpsc;
-use futures::channel::oneshot;
-use std::sync::Arc;
+
 use log::{info,error,debug};
 
 use crate::config;
 use crate::exec::execute::start;
+use crate::proc::comm::ProcessStatusId;
 use crate::proc::comm::StopMessage;
 use crate::proc::description::ProcessDescription;
 use crate::error::{RexecError, RexecErrorType};
@@ -39,14 +37,19 @@ async fn try_create_process(reg: Data<RegisterRef>, item: web::Json<ProcessDescr
 async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Path<(String,)>) ->HttpResponse{
     debug!("DELETE for alias {alias}");
 
-    match reg.get_ref().write().await.get_mut(&alias){
-        Some(p) => { 
-            if p.stop_tx.is_some() {
-                // This will destroy the stop_tx oneshot channel.
-                p.stop_tx = None;
-            }
+    //Lock the Registed for a very short time, only to get the channels.
+    //After this operation the channels will be consumed.
+    //The next DELETE requiest will no do anything but returning the NotFound response.
+    //The Process will be removed from the Registed in the execution context.
+    let (stop_tx, exit_rx) = match reg.get_ref().write().await.get_mut(&alias){
+        Some(p) => (p.stop_tx.take(), p.exit_rx.take()),
+        None => (None,None)
+    };
+    stop_tx.map(|tx| tx.send(StopMessage{}).ok());
+    match exit_rx{
+        Some(mut rx) => {
             tokio::select!{
-                _ = &mut p.exit_rx => {
+                _ = rx.recv() => {
                     debug!("Confirmed process exit via the exit channel");
                     HttpResponse::Ok().body(())
                 }, 
@@ -55,11 +58,12 @@ async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Path<(String,)
                     HttpResponse::RequestTimeout().body(())
                 }
             }
-        },
-        None => {
+        }
+        _ => {
+            debug!("Process {alias} not found");
             HttpResponse::NotFound().body(())
         }
-    }
+    }    
 }
 
 
@@ -207,8 +211,6 @@ impl WebApi{
 
 #[cfg(test)]
 mod web_api_tests{
-    use futures::StreamExt;
-
     use super::*;
 
     #[test]
