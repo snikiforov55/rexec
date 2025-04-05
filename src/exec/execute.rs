@@ -1,119 +1,134 @@
-use std::{process::{ ExitStatus, Stdio}};
-
+use std::process::Stdio;
 
 use chrono::Utc;
 
-use log::{debug, info};
+use log::{debug, error, info};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncRead, BufReader}, 
-    process::{Child, Command}, 
-    sync::{broadcast,oneshot,mpsc}
+    io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
+    process::{Child, Command},
+    sync::{broadcast, mpsc, oneshot},
 };
 
-use crate::{error::{RexecError, RexecErrorType}, proc::comm::ProcessStatusId, register::RegisterRef};
+use crate::{
+    error::{RexecError, RexecErrorType},
+    proc::comm::ProcessStatusId,
+    register::RegisterRef,
+};
 
+use crate::proc::comm::{ExitMessage, ExitTx, Process, StopMessage, StopRx};
 use crate::proc::description::ProcessDescription;
-use crate::proc::comm::{Process, StopRx, ExitTx,StopMessage,ExitMessage};
 
-pub async fn start(reg: &RegisterRef,desc: &ProcessDescription) -> Result<(), RexecError> {
+pub async fn start(reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), RexecError> {
     // Some more advanced checks might be required.
-    if reg.read().await.get(&desc.alias).is_some(){return Err(RexecError::code(RexecErrorType::AlreadyRunning))}
+    if reg.read().await.get(&desc.alias).is_some() {
+        return Err(RexecError::code(RexecErrorType::AlreadyRunning));
+    }
     do_start(reg, desc).await
 }
 
-
-
-struct ChildProc{
+struct ChildProc {
     alias: String,
     child: Child,
     stop_rx: StopRx,
     exit_tx: ExitTx,
     reg: RegisterRef,
-    bcst_tx: broadcast::Sender<String>,
+    bcst_tx: Option<broadcast::Sender<String>>,
+    stdin_rx: Option<mpsc::Receiver<String>>,
     filename: String,
 }
 
-async fn do_start(reg: &RegisterRef,desc: &ProcessDescription) -> Result<(), RexecError>{
+async fn do_start(reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), RexecError> {
     let child_res = Command::new(&desc.cmd)
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped())
-    .stdin(Stdio::piped())
-    .args(&desc.args)
-    .current_dir(&desc.cwd)
-    .envs(&desc.envs)
-    .spawn();
-
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::piped())
+        .args(&desc.args)
+        .current_dir(&desc.cwd)
+        .envs(&desc.envs)
+        .spawn();
 
     match child_res {
         Ok(child) => {
-            let (stop_tx, stop_rx) = oneshot::channel::<StopMessage>();
-            let (exit_tx, exit_rx) = mpsc::channel::<ExitMessage>(1);
-
-            debug!("All stdin, stdout, or stderr are OK for {}",desc.alias);
+            debug!("All stdin, stdout, or stderr are OK for {}", desc.alias);
             let date = Utc::now().format("%Y%M%d-%H%M%S");
-            let filename = format!("{}-utc-{date}.log", desc.alias); 
+            let filename = format!("{}-utc-{date}.log", desc.alias);
             let (bcst_tx, bcst_rx) = broadcast::channel::<String>(32);
             debug!("filename {filename}");
-            let proc = Process{
+
+            let (stop_tx, stop_rx) = oneshot::channel::<StopMessage>();
+            let (exit_tx, exit_rx) = oneshot::channel::<ExitMessage>();
+            let (stdin_tx, stdin_rx) = mpsc::channel::<String>(128);
+
+            let proc = Process {
                 desc: desc.clone(),
                 filename: filename.clone(),
                 stop_tx: Some(stop_tx),
                 exit_rx: Some(exit_rx),
                 bcst_rx,
+                stdin_tx,
                 status: ProcessStatusId::Run,
             };
             let a = desc.alias.clone();
             let reg_ref = reg.clone();
             tokio::task::spawn(async move {
-                run_child(ChildProc{
-                    alias:a,
+                run_child(ChildProc {
+                    alias: a,
                     child,
-                    stop_rx, 
-                    exit_tx, 
-                    reg: reg_ref, 
-                    bcst_tx,
-                    filename}).await
+                    stop_rx,
+                    exit_tx,
+                    reg: reg_ref,
+                    bcst_tx: Some(bcst_tx),
+                    filename,
+                    stdin_rx: Some(stdin_rx),
+                })
+                .await
             });
-            reg.write().await.add(proc); 
+            reg.write().await.add(proc);
             Ok(())
-        },
-        Err(e)=>{
+        }
+        Err(e) => {
             info!("FailedToExecuteProcess {}", &e.to_string());
             Err(RexecError::code(RexecErrorType::FailedToExecuteProcess))
         }
     }
 }
 
-
-async fn write_log<T: AsyncRead+Unpin>(lines: &mut tokio::io::Lines<BufReader<T>>, label: &str)-> Result<(),RexecError>{
-    match lines.next_line().await{
-        Err(e) => Err(RexecError::code_msg(RexecErrorType::UnexpectedEof, e.to_string())),
-        Ok(Some(line)) => {
-            println!("[{label}] {line}");
-            Ok(())
-        },
+async fn write_log<T: AsyncRead + Unpin>(
+    lines: &mut tokio::io::Lines<BufReader<T>>,
+) -> Result<String, RexecError> {
+    match lines.next_line().await {
+        Err(e) => Err(RexecError::code_msg(
+            RexecErrorType::UnexpectedEof,
+            e.to_string(),
+        )),
+        Ok(Some(line)) => Ok(line),
         Ok(None) => Err(RexecError::code(RexecErrorType::UnexpectedEof)),
     }
 }
-async fn run_child(mut child_proc: ChildProc){
-    let io = child_proc.child.stdout
-        .take()
-        .and_then(|o| 
-            child_proc.child.stderr.take().and_then(
-                |e| child_proc.child.stdin.take().map(|i| (o,e,i))
-    ));
-    if io.is_none(){
+fn open_file(filename: &String, alias: &String, dir: &String) {}
+
+async fn run_child(mut child_proc: ChildProc) {
+    let io = child_proc.child.stdout.take().and_then(|o| {
+        child_proc
+            .child
+            .stderr
+            .take()
+            .and_then(|e| child_proc.child.stdin.take().map(|i| (o, e, i)))
+    });
+    if io.is_none() {
         debug!("The child process doesn't have out, err, or in streams. No need to continue the run. Killing child process.");
         child_proc.child.kill().await.ok();
         child_proc.child.wait().await.ok();
-        child_proc.exit_tx.send(ExitMessage{}).await.ok();
-        return
+        child_proc.exit_tx.send(ExitMessage {}).ok();
+        return;
     }
     let alias = child_proc.alias.clone();
-    let (ch_exit_tx,mut ch_exit_rx) = tokio::sync::oneshot::channel();
+    let (ch_exit_tx, mut ch_exit_rx) = tokio::sync::oneshot::channel();
+    let ch_bcast = child_proc.bcst_tx.take();
+    let mut stdin_rx = child_proc.stdin_rx.take().unwrap();
 
-    tokio::spawn(async move{
-        let success = tokio::select!{
+    tokio::spawn(async move {
+        let success = tokio::select! {
             Ok(status) = child_proc.child.wait() => {
                         debug!("Child finished with a status code {status}");
                         true
@@ -138,20 +153,40 @@ async fn run_child(mut child_proc: ChildProc){
             },
         };
         debug!("run_child completed.");
-        if success {child_proc.reg.write().await.remove(&alias);}
-        // Notify all users that the process has exited.
-        // May be needed for monitoring users.break
+        if success {
+            child_proc.reg.write().await.remove(&child_proc.alias);
+        }
+        // Notify the IO coroutine.
         ch_exit_tx.send(()).ok();
-        child_proc.exit_tx.send(ExitMessage{}).await.ok();
+        // Notify the Register that the process has exited.
+        child_proc.exit_tx.send(ExitMessage {}).ok();
     });
     // The None is already checked before.
-    let (o,e,i) = io.unwrap();
+    let (o, e, i) = io.unwrap();
     let mut stdout = BufReader::new(o).lines();
     let mut stderr = BufReader::new(e).lines();
-    loop{
+    let mut stdin = BufWriter::new(i);
+    loop {
         tokio::select! {
-        Ok(()) = write_log(&mut stdout,"OUT") => (),
-        Ok(()) = write_log(&mut stderr,"ERR") => (),
+        Ok(line) = write_log(&mut stdout) => {
+            debug!("[OUT] {line}");
+            ch_bcast.as_ref().map(|b| b.send(format!("[OUT]{line}")).ok());
+        },
+        Ok(line) = write_log(&mut stderr) => {
+            debug!("[ERR] {line}");
+            ch_bcast.as_ref().map(|b| b.send(format!("[ERR]{line}")).ok());
+        },
+        Some(line) = stdin_rx.recv() => {
+            match stdin.write(line.as_bytes()).await{
+                Ok(0) => break, // Most probably the destination is closed
+                Ok(_) => (),//number of bytes written. just continue. the bufwriter takes care about partial writes.
+                Err(e) => {
+                    // Log the error and continue.
+                    error!("Failed to write to the {} stdin. Because: {e}", &alias)
+                }
+            }
+            stdin.flush().await.ok();
+        },
         _ = &mut ch_exit_rx => break,
         else => {
             debug!("select! detected the default exit condition.");
@@ -190,7 +225,6 @@ mod process_tests {
         // tokio::runtime::Runtime:: new()
         //     .expect("Failed to create Tokio runtime")
         //     .block_on(job);
-
     }
     #[test]
     fn test_premature_receiver_close() {
@@ -221,7 +255,6 @@ mod process_tests {
         // tokio::runtime::Runtime:: new()
         //     .expect("Failed to create Tokio runtime")
         //     .block_on(job);
-
     }
     //struct SlowLines;
     // #[test]

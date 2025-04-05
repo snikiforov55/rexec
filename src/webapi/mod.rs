@@ -2,57 +2,64 @@
  * Copyright (c) 2020-2025. Stanislav Nikiforov
  */
 
+use actix_web::web;
 use actix_web::web::Data;
-use actix_web_lab::extract::Path;
 use actix_web::App;
 use actix_web::HttpResponse;
 use actix_web::HttpServer;
-use actix_web::web;
+use actix_web_lab::extract::Path;
 
-use tokio::{time::Duration, sync::{oneshot,mpsc}};
 use std::str::FromStr;
+use tokio::{
+    sync::mpsc,
+    time::Duration,
+};
 
-use log::{info,error,debug};
+use log::{debug, error, info};
 
 use crate::config;
+use crate::config::Config;
+use crate::error::{RexecError, RexecErrorType};
 use crate::exec::execute::start;
 use crate::proc::comm::ProcessStatusId;
 use crate::proc::comm::StopMessage;
 use crate::proc::description::ProcessDescription;
-use crate::error::{RexecError, RexecErrorType};
-use crate::config::Config;
 use crate::register::RegisterRef;
 
-pub struct WebApi{
+pub struct WebApi {
     pub(crate) config: Config,
 }
 
-async fn try_create_process(reg: Data<RegisterRef>, item: web::Json<ProcessDescription>, Path((alias,)): Path<(String,)>) ->HttpResponse{
+async fn try_create_process(
+    reg: Data<RegisterRef>,
+    item: web::Json<ProcessDescription>,
+    Path((alias,)): Path<(String,)>,
+) -> HttpResponse {
     debug!("POST for alias {alias} for \n{:?}", item);
-    match start(reg.get_ref(), &item.into_inner()).await{
+    match start(reg.get_ref(), &item.into_inner()).await {
         Ok(_) => HttpResponse::Ok().body(()),
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string())
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
-async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Path<(String,)>) ->HttpResponse{
+async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Path<(String,)>) -> HttpResponse {
     debug!("DELETE for alias {alias}");
 
     //Lock the Registed for a very short time, only to get the channels.
     //After this operation the channels will be consumed.
     //The next DELETE requiest will no do anything but returning the NotFound response.
     //The Process will be removed from the Registed in the execution context.
-    let (stop_tx, exit_rx) = match reg.get_ref().write().await.get_mut(&alias){
+    let (stop_tx, exit_rx) = match reg.get_ref().write().await.get_mut(&alias) {
         Some(p) => (p.stop_tx.take(), p.exit_rx.take()),
-        None => (None,None)
+        None => (None, None),
     };
-    stop_tx.map(|tx| tx.send(StopMessage{}).ok());
-    match exit_rx{
-        Some(mut rx) => {
-            tokio::select!{
-                _ = rx.recv() => {
+    stop_tx.map(|tx| tx.send(StopMessage {}).ok());
+    match exit_rx {
+        Some(rx) => {
+            tokio::select! {
+                _ = rx => {
                     debug!("Confirmed process exit via the exit channel");
                     HttpResponse::Ok().body(())
-                }, 
+                },
                 _ = tokio::time::sleep(Duration::from_secs(25)) => {
                     debug!("Timeout waiting for the process to exit");
                     HttpResponse::RequestTimeout().body(())
@@ -63,22 +70,21 @@ async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Path<(String,)
             debug!("Process {alias} not found");
             HttpResponse::NotFound().body(())
         }
-    }    
+    }
 }
 
-
-pub fn create_server(config: &Config, reg: RegisterRef)->std::io::Result<actix_web::dev::Server>{
+pub fn create_server(config: &Config, reg: RegisterRef) -> std::io::Result<actix_web::dev::Server> {
     let out = HttpServer::new(move || {
         App::new()
-        // enable loggerstart
-        //.wrap(middleware::Logger::default())
-        .app_data(Data::new(reg.clone()))
-        .app_data(web::JsonConfig::default().limit(4096)) //todo. Read from the confgiuration. <- limit size of the payload (global configuration)
-        .service(
-            web::resource("/process/{alias}")
-                .route(web::post().to(try_create_process))
-                .route(web::delete().to(try_stop_process))
-        )
+            // enable loggerstart
+            //.wrap(middleware::Logger::default())
+            .app_data(Data::new(reg.clone()))
+            .app_data(web::JsonConfig::default().limit(4096)) //todo. Read from the confgiuration. <- limit size of the payload (global configuration)
+            .service(
+                web::resource("/process/{alias}")
+                    .route(web::post().to(try_create_process))
+                    .route(web::delete().to(try_stop_process)),
+            )
         // .service(
         //     web::resource("/extractor2")
         //         .app_data(web::JsonConfig::default().limit(1024)) // <- limit size of the payload (resource level)
@@ -92,21 +98,22 @@ pub fn create_server(config: &Config, reg: RegisterRef)->std::io::Result<actix_w
     Ok(out)
 }
 
-impl WebApi{
-    
-
-    fn parse_body<R>( bytes: &mut R) -> Result<ProcessDescription, RexecError> 
-        where R: std::io::Read{
+impl WebApi {
+    fn parse_body<R>(bytes: &mut R) -> Result<ProcessDescription, RexecError>
+    where
+        R: std::io::Read,
+    {
         //debug!("Received body: {}",body.);
-        let desc : ProcessDescription = serde_json::from_reader(&mut * bytes)
-            .map_err(|e| {
-                let mut body = String::new();
-                match bytes.read_to_string(&mut body){
-                    Ok(_) => error!("Failed to parse JSON from a request body {body} from string. Reason {e}"),
-                    Err(_) => error!("Failed to parse JSON from a request body string. Reason {e}")
-                }
-                RexecError::code(RexecErrorType::InvalidCreateProcessRequest)
-            })?;
+        let desc: ProcessDescription = serde_json::from_reader(&mut *bytes).map_err(|e| {
+            let mut body = String::new();
+            match bytes.read_to_string(&mut body) {
+                Ok(_) => error!(
+                    "Failed to parse JSON from a request body {body} from string. Reason {e}"
+                ),
+                Err(_) => error!("Failed to parse JSON from a request body string. Reason {e}"),
+            }
+            RexecError::code(RexecErrorType::InvalidCreateProcessRequest)
+        })?;
         Ok(desc)
     }
     // pub async fn start<>(self) ->Result<(), RexecError>{
@@ -119,7 +126,7 @@ impl WebApi{
     //     let address = SocketAddr::new(ip, self.config.port);
 
     //     let the_arc = Arc::new(self);
-        
+
     //     info!("Starting service on {}", address.to_string());
     //     let listener = TcpListener::bind(&address)
     //         .await
@@ -133,7 +140,7 @@ impl WebApi{
     //     loop{
     //         let (stream, _) = listener
     //             .accept()
-    //             .await            
+    //             .await
     //             .map_err(|e| {
     //                 log::error!("FailedToStartWebServer {}", &e.to_string());
     //                 RexecError::code_msg(
@@ -143,7 +150,7 @@ impl WebApi{
     //         let io = TokioIo::new(stream);
     //         let api = the_arc.clone();
     //         tokio::task::spawn(async move {
-    //             let service = 
+    //             let service =
     //                 service_fn(| req: Request<IncomingBody>| {
     //                     let api2 = api.clone();
     //                     async move {
@@ -152,10 +159,10 @@ impl WebApi{
     //                 });
     //             if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
     //                 println!("Failed to serve connection: {:?}", err);
-                    
+
     //             }
     //         });
-    //     }   
+    //     }
     // }
     //     Ok(desc)
     // }
@@ -169,7 +176,7 @@ impl WebApi{
     //     let address = SocketAddr::new(ip, self.config.port);
 
     //     let the_arc = Arc::new(self);
-        
+
     //     info!("Starting service on {}", address.to_string());
     //     let listener = TcpListener::bind(&address)
     //         .await
@@ -183,7 +190,7 @@ impl WebApi{
     //     loop{
     //         let (stream, _) = listener
     //             .accept()
-    //             .await            
+    //             .await
     //             .map_err(|e| {
     //                 log::error!("FailedToStartWebServer {}", &e.to_string());
     //                 RexecError::code_msg(
@@ -193,7 +200,7 @@ impl WebApi{
     //         let io = TokioIo::new(stream);
     //         let api = the_arc.clone();
     //         tokio::task::spawn(async move {
-    //             let service = 
+    //             let service =
     //                 service_fn(| req: Request<IncomingBody>| {
     //                     let api2 = api.clone();
     //                     async move {
@@ -202,19 +209,18 @@ impl WebApi{
     //                 });
     //             if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
     //                 println!("Failed to serve connection: {:?}", err);
-                    
+
     //             }
     //         });
-    //     }   
+    //     }
 }
 
-
 #[cfg(test)]
-mod web_api_tests{
+mod web_api_tests {
     use super::*;
 
     #[test]
-    fn test_parse_body_full(){
+    fn test_parse_body_full() {
         let body = r#"{
             "alias" : "test",
             "cmd": "shell",yper::body::Bytes::from(
@@ -229,7 +235,8 @@ mod web_api_tests{
                 "PATH": "/bin",
                 "SECRET_KEY": "QWE_YUI_345_GHJ_789"
             }
-        }"#.to_string();
+        }"#
+        .to_string();
         let desc = WebApi::parse_body(&mut body.as_bytes()).unwrap();
         assert_eq!(desc.alias, "test".to_string());
         assert_eq!(desc.cmd, "shell".to_string());
@@ -238,11 +245,12 @@ mod web_api_tests{
         assert_eq!(desc.envs.len(), 2);
     }
     #[test]
-    fn test_parse_body_minimal(){
+    fn test_parse_body_minimal() {
         let body = r#"{
             "alias" : "test",
             "cmd": "shell"
-        }"#.to_string();
+        }"#
+        .to_string();
         let desc = WebApi::parse_body(&mut body.as_bytes()).unwrap();
         assert_eq!(desc.alias, "test".to_string());
         assert_eq!(desc.cmd, "shell".to_string());
@@ -251,13 +259,17 @@ mod web_api_tests{
         assert_eq!(desc.envs.len(), 0);
     }
     #[test]
-    fn test_parse_body_failing(){
+    fn test_parse_body_failing() {
         let body = r#"{
             "alias" : "test"
-        }"#.to_string();
+        }"#
+        .to_string();
         let desc = WebApi::parse_body(&mut body.as_bytes());
         assert!(!desc.is_ok());
-        matches!(desc.err().unwrap().code, RexecErrorType::InvalidCreateProcessRequest);
+        matches!(
+            desc.err().unwrap().code,
+            RexecErrorType::InvalidCreateProcessRequest
+        );
     }
     // #[test]
     // fn test_router_non_api(){

@@ -12,8 +12,8 @@ pub type ExitMessage = Message;
 pub type StopTx = oneshot::Sender<StopMessage>;
 pub type StopRx = oneshot::Receiver<StopMessage>;
 
-pub type ExitRx = mpsc::Receiver<ExitMessage>;
-pub type ExitTx = mpsc::Sender<ExitMessage>;
+pub type ExitRx = oneshot::Receiver<ExitMessage>;
+pub type ExitTx = oneshot::Sender<ExitMessage>;
 
 pub enum ProcessStatusId {
     Run,
@@ -27,6 +27,7 @@ pub struct Process{
     pub stop_tx: Option<StopTx>,
     pub exit_rx: Option<ExitRx>,
     pub bcst_rx: broadcast::Receiver<String>,
+    pub stdin_tx: mpsc::Sender<String>,
     pub status: ProcessStatusId,
 }
 
