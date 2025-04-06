@@ -17,7 +17,6 @@ pub type ExitTx = oneshot::Sender<ExitMessage>;
 
 pub enum ProcessStatusId {
     Run,
-    Exit,
     Failed,
 }
 

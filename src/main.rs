@@ -1,14 +1,12 @@
 /*
  * Copyright (c) 2020. Stanislav Nikiforov
  */
-//#![recursion_limit="256"]
 
 use log::{info, error};
-use register::{create_register_ref};
+use register::create_register_ref;
 use simplelog::*;
 use std::fs::File;
 
-use crate::webapi::WebApi;
 use crate::config::Config;
 mod error;
 mod webapi;
