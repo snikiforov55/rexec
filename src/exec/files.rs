@@ -5,8 +5,7 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
-use chrono::Utc;
-
+use crate::util::time::time_stamp_min;
 use crate::error::{RexecError, RexecErrorType};
 
 pub struct FileInfo {
@@ -45,7 +44,7 @@ impl FileInfo {
         })
     }
     fn next_filename(alias: &String) -> String {
-        let date = Utc::now().format("%Y%m%d-%H%M");
-        return format!("{}-utc-{date}.log", alias);
+        return format!("{}-utc-{}.log", alias, time_stamp_min());
     }
+
 }

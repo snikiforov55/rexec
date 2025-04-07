@@ -14,6 +14,7 @@ use crate::{
         description::ProcessDescription,
     },
     register::RegisterRef,
+    util::time::time_stamp_fsec,
 };
 
 use super::files::FileInfo;
@@ -52,10 +53,10 @@ async fn do_start(reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), Re
             let fileinfo = FileInfo::next_file(&desc.alias, &desc.cwd).await?;
             debug!("filename {}", fileinfo.filename);
 
-            let (bcst_tx, bcst_rx) = broadcast::channel::<String>(32);
             let (stop_tx, stop_rx) = oneshot::channel::<StopMessage>();
             let (exit_tx, exit_rx) = oneshot::channel::<ExitMessage>();
             let (stdin_tx, stdin_rx) = mpsc::channel::<String>(128);
+            let (bcst_tx, bcst_rx) = broadcast::channel::<String>(32);
 
             let proc = Process {
                 desc: desc.clone(),
@@ -167,14 +168,14 @@ async fn run_child(mut child_proc: ChildProc) {
     loop {
         tokio::select! {
         Ok(line) = write_log(&mut stdout) => {
-            debug!("[OUT] {line}");
-            let l = format!("[OUT]{line}\n");
+            let l = format!("{}|OUT|{line}\n", time_stamp_fsec());
+            debug!("{l}");
             let _ = &mut fileinfo.write(&l).await;
             ch_bcast.as_ref().map(|b| b.send(l).ok());
         },
         Ok(line) = write_log(&mut stderr) => {
-            debug!("[ERR] {line}");
-            let l = format!("[OUT]{line}\n");
+            let l = format!("{}|ERR|{line}\n", time_stamp_fsec());
+            debug!("{line}");
             let _ = &mut fileinfo.write(&l).await;
             ch_bcast.as_ref().map(|b| b.send(l).ok());
         },

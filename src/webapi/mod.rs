@@ -16,7 +16,7 @@ use tokio::{
 
 use log::{debug, error, info};
 
-use crate::config::Config;
+use crate::util::config::Config;
 use crate::exec::execute::start;
 use crate::proc::comm::StopMessage;
 use crate::proc::description::ProcessDescription;

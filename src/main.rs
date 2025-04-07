@@ -7,13 +7,14 @@ use register::create_register_ref;
 use simplelog::*;
 use std::fs::File;
 
-use crate::config::Config;
 mod error;
 mod webapi;
-mod config;
+pub(crate) mod util;
 pub(crate) mod proc;
 pub(crate) mod exec;
 pub(crate) mod register;
+
+use util::config::Config;
 
 
 fn main() {
@@ -43,13 +44,9 @@ fn main() {
     info!("Version: {}",env!("CARGO_PKG_VERSION"));
     info!("Starting with configuration: \
         ip: {}, \
-        port: {}, \
-        status_size: {}, \
-        stdout_size: {}",
+        port: {}",
           &config.ip,
-          &config.port,
-          &config.status_size,
-          &config.stdout_size);
+          &config.port);
 
     let register = create_register_ref();
     let api = webapi::create_server(&config,register.clone()).unwrap();
