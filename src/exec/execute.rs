@@ -27,6 +27,7 @@ pub async fn start(reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), R
     do_start(reg, desc).await
 }
 
+
 struct ChildProc {
     alias: String,
     child: Child,
@@ -39,6 +40,8 @@ struct ChildProc {
 }
 
 async fn do_start(reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), RexecError> {
+    // Todo. Register the process as soon as possible to avoid a race 
+    // condition if two requests are coming at the same time.
     let child_res = Command::new(&desc.cmd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -51,7 +54,7 @@ async fn do_start(reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), Re
     match child_res {
         Ok(child) => {
             let fileinfo = FileInfo::next_file(&desc.alias, &desc.cwd).await?;
-            debug!("filename {}", fileinfo.filename);
+            debug!("filename {:?}", fileinfo.filename);
 
             let (stop_tx, stop_rx) = oneshot::channel::<StopMessage>();
             let (exit_tx, exit_rx) = oneshot::channel::<ExitMessage>();
@@ -60,13 +63,15 @@ async fn do_start(reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), Re
 
             let proc = Process {
                 desc: desc.clone(),
+                status: ProcessStatusId::New,
                 filename: fileinfo.filename.clone(),
                 stop_tx: Some(stop_tx),
                 exit_rx: Some(exit_rx),
                 bcst_rx,
                 stdin_tx,
-                status: ProcessStatusId::Run,
             };
+            reg.write().await.add(proc);
+
             let a = desc.alias.clone();
             let reg_ref = reg.clone();
             tokio::task::spawn(async move {
@@ -82,7 +87,6 @@ async fn do_start(reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), Re
                 })
                 .await
             });
-            reg.write().await.add(proc);
             Ok(())
         }
         Err(e) => {
