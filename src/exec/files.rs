@@ -3,6 +3,7 @@ use crate::util::time::time_stamp_min;
 use futures_util::TryFutureExt;
 use log::debug;
 use std::cmp::Ordering;
+use std::ffi::OsStr;
 use std::{ffi::OsString, path::PathBuf};
 use tokio::{
     fs::{self, create_dir_all, File},
@@ -63,22 +64,23 @@ impl FileInfo {
                     tokio::task::spawn_blocking(move || {
                         let r = std::fs::read_dir(pp)
                             .and_then(|res| {
-                                res.map(|dirs| dirs.map(|e| 
-                                    match e.path().is_file(){
+                                res.map(|dirs| {
+                                    dirs.map(|e| match e.path().is_file() {
                                         true => Some(e),
-                                        _ => None
-                                    }))
-                                    .collect::<Result<Vec<_>, std::io::Error>>()
-                                    
+                                        _ => None,
+                                    })
+                                })
+                                .collect::<Result<Vec<_>, std::io::Error>>()
                             })
                             .map(|v| {
-                                if v.len() < 5 {None}
-                                else{
-                                    v.into_iter()
-                                        .flatten()
-                                        .min_by(|l, r| {
-                                        let cmp =
-                                            l.metadata().and_then(|lm| lm.created()).and_then(|lt| {
+                                if v.len() < 5 {
+                                    None
+                                } else {
+                                    v.into_iter().flatten().min_by(|l, r| {
+                                        let cmp = l
+                                            .metadata()
+                                            .and_then(|lm| lm.created())
+                                            .and_then(|lt| {
                                                 r.metadata()
                                                     .and_then(|rm| rm.created())
                                                     .map(|rt| lt.cmp(&rt))
@@ -88,11 +90,13 @@ impl FileInfo {
                                             _ => Ordering::Equal,
                                         }
                                     })
-                                }                                
+                                }
                             })
                             .unwrap_or(None);
                         // This removes the oldest file if there are 5 files in the folder
-                        if let Some(de) = r {std::fs::remove_file(de.path()).ok();}
+                        if let Some(de) = r {
+                            std::fs::remove_file(de.path()).ok();
+                        }
                     })
                     .await
                     .ok();
@@ -105,6 +109,41 @@ impl FileInfo {
                 message: e.to_string(),
             });
         p
+    }
+    async fn do_clean_files(p: PathBuf, alias: String, ext: String) {
+        tokio::task::spawn_blocking(move || {
+            std::fs::read_dir(p)
+                .map(|res| {
+                    let mut v = res
+                        .flatten()
+                        .filter(|de| de.path().is_file() && de.path().ends_with(&ext))
+                        .filter(|de| {
+                            de.path()
+                                .file_name()
+                                .and_then(OsStr::to_str)
+                                .is_some_and(|f| f.starts_with(&alias))
+                        })
+                        .collect::<Vec<_>>();
+
+                    v.sort_by(|l, r| {
+                        l
+                        .metadata()
+                        .and_then(|lm| lm.created())
+                        .and_then(|lt| {
+                            r.metadata()
+                            .and_then(|rm| rm.created())
+                            .map(|rt| lt.cmp(&rt))
+                        })
+                        .unwrap_or(Ordering::Equal)
+                    });
+                    // This keep first four newest files and removes the oldest
+                    for f in &v[std::cmp::min(4,v.len())..] {
+                        std::fs::remove_file(f.path()).ok();
+                    }
+                })            
+        })
+        .await
+        .ok();
     }
 }
 
@@ -128,5 +167,22 @@ mod files_tests {
         tokio::runtime::Runtime::new()
             .expect("Failed to create Tokio runtime")
             .block_on(call);
+    }
+    #[test]
+    fn test_slice() {
+        let v = vec![1,2,3,4];
+        assert_eq!(*&v[0..2].len(), 2);
+        assert_eq!(*&v[1..].len(), 3);
+        assert_eq!(*&v[3..].len(), 1);
+        assert_eq!(*&v[std::cmp::min(3,v.len())..].len(), 1);
+        assert_eq!(*&v[std::cmp::min(4,v.len())..].len(), 0);
+
+        let v = vec![1,2,3,4,5,6,7,8];
+        assert_eq!(*&v[std::cmp::min(4,v.len())..].len(), 4);
+
+        let v: Vec<i32> = Vec::new();
+        assert_eq!(*&v[std::cmp::min(4,v.len())..].len(), 0);
+
+
     }
 }
