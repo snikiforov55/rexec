@@ -90,7 +90,7 @@ impl FileInfo {
                         .and_then(|lt| {
                             r.metadata()
                             .and_then(|rm| rm.created())
-                            .map(|rt| lt.cmp(&rt))
+                            .map(|rt| rt.cmp(&lt))
                         })
                         .unwrap_or(Ordering::Equal)
                     });
