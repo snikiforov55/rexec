@@ -1,12 +1,11 @@
 use crate::error::{RexecError, RexecErrorType};
-use crate::util::time::time_stamp_min;
-use futures_util::TryFutureExt;
+use crate::util::time::{time_stamp_sec,time_stamp_min,time_stamp_hour};
 use log::debug;
 use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::{ffi::OsString, path::PathBuf};
 use tokio::{
-    fs::{self, create_dir_all, File},
+    fs::{create_dir_all, File},
     io::AsyncWriteExt,
 };
 
@@ -41,8 +40,14 @@ impl FileInfo {
             message: e.to_string(),
         })
     }
-    fn next_filename(alias: &String) -> String {
+    fn next_filename_min(alias: &String) -> String {
         return format!("{}-utc-{}.log", alias, time_stamp_min());
+    }
+    fn next_filename_hour(alias: &String) -> String {
+        return format!("{}-utc-{}.log", alias, time_stamp_hour());
+    }
+    fn next_filename_sec(alias: &String) -> String {
+        return format!("{}-utc-{}.log", alias, time_stamp_sec());
     }
     async fn rotate_files(alias: &String, dir: &String) -> Result<PathBuf, RexecError> {
         let mut path = [dir, alias].iter().collect::<PathBuf>();
@@ -50,81 +55,34 @@ impl FileInfo {
         debug!("Log directory: {:?}", path);
         create_dir_all(&path)
             .await
-            .map_err(|e| RexecError::code_msg(RexecErrorType::FailedDirCreate, e.to_string()))?;
-
-        path.push(FileInfo::next_filename(alias));
+            .map_err(|e| RexecError::code_msg(RexecErrorType::FailedDirCreate, e.to_string()))?;      
+        FileInfo::do_clean_files(
+            path.clone(), 
+            alias.clone(), 
+            "log".to_string()).await.ok();
+        path.push(FileInfo::next_filename_hour(alias));
         debug!("Log filename full: {:?}", &path);
-        let pp = path.clone();
-        let p = fs::try_exists(path)
-            .and_then(|exists| async move {
-                if exists {
-                    Ok(pp)
-                } else {
-                    let ppp = pp.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let r = std::fs::read_dir(pp)
-                            .and_then(|res| {
-                                res.map(|dirs| {
-                                    dirs.map(|e| match e.path().is_file() {
-                                        true => Some(e),
-                                        _ => None,
-                                    })
-                                })
-                                .collect::<Result<Vec<_>, std::io::Error>>()
-                            })
-                            .map(|v| {
-                                if v.len() < 5 {
-                                    None
-                                } else {
-                                    v.into_iter().flatten().min_by(|l, r| {
-                                        let cmp = l
-                                            .metadata()
-                                            .and_then(|lm| lm.created())
-                                            .and_then(|lt| {
-                                                r.metadata()
-                                                    .and_then(|rm| rm.created())
-                                                    .map(|rt| lt.cmp(&rt))
-                                            });
-                                        match cmp {
-                                            Ok(c) => c,
-                                            _ => Ordering::Equal,
-                                        }
-                                    })
-                                }
-                            })
-                            .unwrap_or(None);
-                        // This removes the oldest file if there are 5 files in the folder
-                        if let Some(de) = r {
-                            std::fs::remove_file(de.path()).ok();
-                        }
-                    })
-                    .await
-                    .ok();
-                    Ok(ppp)
-                }
-            })
-            .await
-            .map_err(|e| RexecError {
-                code: RexecErrorType::FailedFileCreate,
-                message: e.to_string(),
-            });
-        p
+        Ok(path)
     }
-    async fn do_clean_files(p: PathBuf, alias: String, ext: String) {
+    /// Deletes old files. Keep latest N files. The N is configurable
+    /// 
+    async fn do_clean_files(p: PathBuf, alias: String, ext: String) -> Result<(), RexecError> {
         tokio::task::spawn_blocking(move || {
-            std::fs::read_dir(p)
+            let res = std::fs::read_dir(p)
                 .map(|res| {
                     let mut v = res
                         .flatten()
-                        .filter(|de| de.path().is_file() && de.path().ends_with(&ext))
+                        .filter(|de| 
+                            de.path().is_file() 
+                        )
                         .filter(|de| {
                             de.path()
                                 .file_name()
                                 .and_then(OsStr::to_str)
-                                .is_some_and(|f| f.starts_with(&alias))
+                                .is_some_and(|f| f.starts_with(&alias) && f.ends_with(&ext))
                         })
                         .collect::<Vec<_>>();
-
+                    debug!("log files found: {:?}", &v);
                     v.sort_by(|l, r| {
                         l
                         .metadata()
@@ -138,12 +96,16 @@ impl FileInfo {
                     });
                     // This keep first four newest files and removes the oldest
                     for f in &v[std::cmp::min(4,v.len())..] {
+                        debug!("Deleting old log: {:?}", f.path());
                         std::fs::remove_file(f.path()).ok();
                     }
-                })            
+            });
+            if let Err(e) = res {
+                debug!("Failed to read directory {:?}", e);
+            }     
         })
         .await
-        .ok();
+        .map_err(|e| RexecError{code: RexecErrorType::FailedDirCreate, message: e.to_string()})
     }
 }
 
