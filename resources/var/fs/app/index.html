@@ -1,0 +1,48 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+<style>
+
+</style>
+</head>
+<body>
+<div style="display:flex; flex:auto; height: 100vw; flex-direction: column;">
+    <div style="display:flex; flex:none">config.name config.version</div>
+    <div style="display:flex; flex:auto; flex-direction: row;">
+        <div style="display:flex; flex:none; flex-direction: column; flex-shrink: 1;width: fit-content;">
+            <div style="flex:none">Processes</div>
+            <div 
+                style="margin-left: 0.2em; display:flex; flex-direction: column;"
+                id="procs"
+            >
+            procs
+            </div>
+        </div>
+        <div style="display:flex; flex:auto; flex-direction: column; width: fit-content">
+            <div style="flex: none;">Details</div>
+            <div style="display:flex; flex:auto; flex-grow: initial;" id="proc_details">
+                something
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    const config={
+        name: "rexec",
+        version: "2.0.0"
+    };
+    const proc_list = [];
+    var proc_selection = undefined;
+
+    async function fetch_all() {
+        
+    }
+    function create_process_view(){
+
+    }
+    function create_details_view(){
+
+    }
+</script>
+</body>
+</html>
