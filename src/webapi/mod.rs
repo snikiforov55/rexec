@@ -2,6 +2,8 @@
  * Copyright (c) 2020-2025. Stanislav Nikiforov
  */
 
+use std::sync::Arc;
+
 use actix_web::web;
 use actix_web::web::Data;
 use actix_web::App;
@@ -24,12 +26,13 @@ use crate::register::RegisterRef;
 
 
 async fn try_create_process(
+    conf: Data<Arc<Config>>,
     reg: Data<RegisterRef>,
     item: web::Json<ProcessDescription>,
     Path((alias,)): Path<(String,)>,
 ) -> HttpResponse {
     debug!("POST for alias {alias} for \n{:?}", item);
-    match start(reg.get_ref(), &item.into_inner()).await {
+    match start(conf.get_ref(), reg.get_ref(), &item.into_inner()).await {
         Ok(_) => HttpResponse::Ok().body(()),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
@@ -66,13 +69,16 @@ async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Path<(String,)
     }
 }
 
-pub fn create_server(config: &Config, reg: RegisterRef) -> std::io::Result<actix_web::dev::Server> {
+pub fn create_server(config: Arc<Config>, reg: RegisterRef) -> std::io::Result<actix_web::dev::Server> {
+    let json_default_limit = config.net.json_default_limit;
+    let cfg = config.clone();
     let out = HttpServer::new(move || {
         App::new()
             // enable loggerstart
             //.wrap(middleware::Logger::default())
+            .app_data(Data::new(cfg.clone()))
             .app_data(Data::new(reg.clone()))
-            .app_data(web::JsonConfig::default().limit(4096)) //todo. Read from the confgiuration. <- limit size of the payload (global configuration)
+            .app_data(web::JsonConfig::default().limit(json_default_limit)) //todo. Read from the confgiuration. <- limit size of the payload (global configuration)
             .service(
                 web::resource("/process/{alias}")
                     .route(web::post().to(try_create_process))
@@ -86,7 +92,7 @@ pub fn create_server(config: &Config, reg: RegisterRef) -> std::io::Result<actix
         //.service(web::resource("/manual").route(web::post().to(index_manual)))
         //.service(web::resource("/").route(web::post().to(index)))
     })
-    .bind((config.ip.clone(), config.port))?
+    .bind((config.net.ip.clone(), config.net.port))?
     .run();
     Ok(out)
 }

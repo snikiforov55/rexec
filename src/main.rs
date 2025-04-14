@@ -5,7 +5,7 @@
 use log::{info, error};
 use register::create_register_ref;
 use simplelog::*;
-use std::fs::File;
+use std::{fs::File, sync::Arc};
 
 mod error;
 mod webapi;
@@ -45,11 +45,12 @@ fn main() {
     info!("Starting with configuration: \
         ip: {}, \
         port: {}",
-          &config.ip,
-          &config.port);
+          &config.net.ip,
+          &config.net.port);
 
     let register = create_register_ref();
-    let api = webapi::create_server(&config,register.clone()).unwrap();
+    let conf_ref = Arc::new(config);
+    let api = webapi::create_server(conf_ref.clone(),register.clone()).unwrap();
 
     let job = async{
         // let (res_broker, res_api) = futures::join!(broker.start(), api);

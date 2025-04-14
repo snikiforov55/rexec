@@ -2,13 +2,43 @@
  * Copyright (c) 2020. Stanislav Nikiforov
  */
 
+use std::path::PathBuf;
+
 use clap::{command, Arg};
+use serde_json::to_string;
 #[derive(Clone)]
-pub struct Config {
+pub struct IoConfig{
+    pub stdin_capasity: u32,
+    pub bcast_capasity: u32,
+}
+#[derive(Clone)]
+pub struct NetConfig{
     pub ip: String,
     pub port: u16,
+    pub json_default_limit: usize,
+}
+
+#[derive(Clone)]
+enum LogTimeStamp{
+    Sec,
+    Min,
+    Hour,
+    Day
+}
+#[derive(Clone)]
+pub struct PathConfig{
+    pub install_dir: PathBuf,
+    pub log_dir: PathBuf,
+    pub config_dir: PathBuf,
+    pub max_log_files: u32,
+    pub log_timestamp: LogTimeStamp,
+}
+#[derive(Clone)]
+pub struct Config {
     pub verbosity_level: String,
-    pub install_dir: Option<String>,
+    pub path: PathConfig,
+    pub net: NetConfig,
+    pub io: IoConfig,
 }
 
 
@@ -47,25 +77,44 @@ impl Config {
                     .required(false),
             )
             .get_matches();
-
+        let install_dir = matches
+        .get_one::<String>("install-directory")
+        .map(|s| PathBuf::from(s))
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+        })
+        .unwrap_or(PathBuf::from("."));
         Config {
-            ip: matches
-                .get_one::<String>("ip")
-                .unwrap_or(&"0.0.0.0".to_string())
-                .to_string(),
-            port: *matches.get_one::<u16>("port").unwrap_or(&8910),
             verbosity_level: matches
                 .get_one::<String>("log-level")
                 .unwrap_or(&"debug".to_string())
                 .to_string(),
-            install_dir: matches
-                .get_one::<String>("install-directory")
-                .map(|s| s.to_string())
-                .or_else(|| {
-                    std::env::current_exe()
-                        .ok()
-                        .and_then(|p| p.to_str().map(|s| s.to_string()))
-                }),
+            net:NetConfig{
+                ip: matches
+                    .get_one::<String>("ip")
+                    .unwrap_or(&"0.0.0.0".to_string())
+                    .to_string(),
+                port: *matches.get_one::<u16>("port").unwrap_or(&8910),
+                json_default_limit: 4096,
+            },
+            path: PathConfig {
+                log_dir: {let mut p = install_dir.clone();
+                    p.push("var");
+                    p.push("log");
+                    p
+                }, 
+                config_dir: {let mut p = install_dir.clone();
+                    p.push("etc");
+                    p
+                }, 
+                install_dir,
+                max_log_files: 5, 
+                log_timestamp: LogTimeStamp::Day 
+            },
+            io: IoConfig { 
+                stdin_capasity: 32, 
+                bcast_capasity: 128 }
         }
     }
 }

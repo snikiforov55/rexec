@@ -1,4 +1,4 @@
-use std::process::Stdio;
+use std::{process::Stdio, sync::Arc};
 
 use log::{debug, error, info};
 use tokio::{
@@ -14,12 +14,12 @@ use crate::{
         description::ProcessDescription,
     },
     register::RegisterRef,
-    util::time::time_stamp_fsec,
+    util::{config::Config, time::time_stamp_fsec},
 };
 
 use super::files::FileInfo;
 
-pub async fn start(reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), RexecError> {
+pub async fn start(conf: &Arc<Config>, reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), RexecError> {
     // Some more advanced checks might be required.
     if reg.read().await.get(&desc.alias).is_some() {
         return Err(RexecError::code(RexecErrorType::AlreadyRunning));
