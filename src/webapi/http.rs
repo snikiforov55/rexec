@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use actix_web::web::{self, Data};
+use actix_web::web::{self, Data, JsonBody};
 use actix_web::HttpResponse;
 use actix_web_lab::extract::Path;
 use log::debug;
@@ -51,6 +51,26 @@ pub(super) async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Pat
         }
         _ => {
             debug!("Process {alias} not found");
+            HttpResponse::NotFound().body(())
+        }
+    }
+}
+
+
+pub(super) async fn try_get_status(reg: Data<RegisterRef>, Path((alias,)): Path<(String,)>) -> HttpResponse {
+    debug!("GET for alias {alias}");
+
+    let info = match reg.get_ref().read().await.get(&alias) {
+        Some(p) => Some(p.desc.clone()),
+        None => None,
+    };
+    match info {
+        Some(i) => {
+            debug!("GET is responding with the Description {:?}", i);
+            HttpResponse::Ok().json(i)
+        }
+        None => {
+            debug!("GET Process {alias} not found");
             HttpResponse::NotFound().body(())
         }
     }

@@ -21,11 +21,16 @@ pub fn create_server(config: Arc<Config>, reg: RegisterRef) -> std::io::Result<a
             //.wrap(middleware::Logger::default())
             .app_data(Data::new(cfg.clone()))
             .app_data(Data::new(reg.clone()))
-            .app_data(web::JsonConfig::default().limit(json_default_limit)) //todo. Read from the confgiuration. <- limit size of the payload (global configuration)
+            .app_data(web::JsonConfig::default().limit(json_default_limit)) //limit size of the payload (global configuration)
             .service(
                 web::resource("/process/{alias}")
                     .route(web::post().to(http::try_create_process))
-                    .route(web::delete().to(http::try_stop_process)),
+                    .route(web::delete().to(http::try_stop_process))
+                    .route(web::get().to(http::try_get_status)),
+            )
+            .service(
+                web::resource("/process")
+                    .route(web::get().to(http::try_get_status)),
             )
         // .service(
         //     web::resource("/extractor2")

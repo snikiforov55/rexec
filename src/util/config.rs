@@ -83,6 +83,7 @@ impl Config {
         .or_else(|| {
             std::env::current_exe()
                 .ok()
+                .map(|mut p| {p.pop(); p})// chop the executable name
         })
         .unwrap_or(PathBuf::from("."));
         Config {
