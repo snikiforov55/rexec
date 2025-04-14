@@ -14,3 +14,6 @@ pub fn time_stamp_min()->String{
 pub fn time_stamp_hour()->String{
     return Utc::now().format("%Y%m%d-%H").to_string()
 }
+pub fn time_stamp_day()->String{
+    return Utc::now().format("%Y%m%d").to_string()
+}

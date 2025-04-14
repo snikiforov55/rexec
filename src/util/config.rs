@@ -8,8 +8,8 @@ use clap::{command, Arg};
 use serde_json::to_string;
 #[derive(Clone)]
 pub struct IoConfig{
-    pub stdin_capasity: u32,
-    pub bcast_capasity: u32,
+    pub stdin_capasity: usize,
+    pub bcast_capasity: usize,
 }
 #[derive(Clone)]
 pub struct NetConfig{
@@ -19,7 +19,7 @@ pub struct NetConfig{
 }
 
 #[derive(Clone)]
-enum LogTimeStamp{
+pub enum LogTimeStamp{
     Sec,
     Min,
     Hour,
@@ -30,7 +30,7 @@ pub struct PathConfig{
     pub install_dir: PathBuf,
     pub log_dir: PathBuf,
     pub config_dir: PathBuf,
-    pub max_log_files: u32,
+    pub max_log_files: usize,
     pub log_timestamp: LogTimeStamp,
 }
 #[derive(Clone)]

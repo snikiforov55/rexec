@@ -24,7 +24,7 @@ pub async fn start(conf: &Arc<Config>, reg: &RegisterRef, desc: &ProcessDescript
     if reg.read().await.get(&desc.alias).is_some() {
         return Err(RexecError::code(RexecErrorType::AlreadyRunning));
     }
-    do_start(reg, desc).await
+    do_start(conf, reg, desc).await
 }
 
 struct ChildProc {
@@ -38,7 +38,7 @@ struct ChildProc {
     fileinfo: FileInfo,
 }
 
-async fn do_start(reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), RexecError> {
+async fn do_start(conf: &Arc<Config>, reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), RexecError> {
     // Todo. Register the process as soon as possible to avoid a race
     // condition if two requests are coming at the same time.
     let child_res = Command::new(&desc.cmd)
@@ -52,13 +52,13 @@ async fn do_start(reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), Re
 
     match child_res {
         Ok(child) => {
-            let fileinfo = FileInfo::next_file(&desc.alias, &desc.cwd).await?;
+            let fileinfo = FileInfo::next_file(&desc.alias, &conf.path).await?;
             debug!("filename {:?}", fileinfo.filename);
 
             let (stop_tx, stop_rx) = oneshot::channel::<StopMessage>();
             let (exit_tx, exit_rx) = oneshot::channel::<ExitMessage>();
-            let (stdin_tx, stdin_rx) = mpsc::channel::<String>(128);
-            let (bcst_tx, bcst_rx) = broadcast::channel::<String>(32);
+            let (stdin_tx, stdin_rx) = mpsc::channel::<String>(conf.io.stdin_capasity);
+            let (bcst_tx, bcst_rx) = broadcast::channel::<String>(conf.io.bcast_capasity);
 
             let proc = Process {
                 desc: desc.clone(),
@@ -135,6 +135,12 @@ async fn run_child(mut child_proc: ChildProc) {
         child.kill().await.ok();
         child.wait().await.ok();
         child_proc.exit_tx.send(ExitMessage {}).ok();
+        child_proc
+            .reg
+            .write()
+            .await
+            .get_mut(&child_proc.alias)
+            .map(|p| p.status = ProcessStatusId::Failed);
         return;
     }
     let alias = child_proc.alias.clone();
@@ -160,6 +166,12 @@ async fn run_child(mut child_proc: ChildProc) {
             },
         }
     });
+    child_proc
+            .reg
+            .write()
+            .await
+            .get_mut(&child_proc.alias)
+            .map(|p| p.status = ProcessStatusId::Run);
     // The None is already checked before.
     let (o, e, i) = io.unwrap();
     let mut stdout = BufReader::new(o).lines();
