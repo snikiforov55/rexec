@@ -18,10 +18,18 @@ pub(super) async fn try_create_process(
     Path((alias,)): Path<(String,)>,
 ) -> HttpResponse {
     debug!("POST for alias {alias} for \n{:?}", item);
-    match start(conf.get_ref(), reg.get_ref(), &item.into_inner()).await {
-        Ok(_) => HttpResponse::Ok().body(()),
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    let mut i = item.into_inner();
+    i.alias = alias;
+    if i.alias.is_empty() {
+        HttpResponse::InternalServerError().body("Invalid alias provided.")
     }
+    else{
+        match start(conf.get_ref(), reg.get_ref(), &i ).await {
+            Ok(_) => HttpResponse::Ok().body(()),
+            Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+        }
+    }
+
 }
 
 pub(super) async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Path<(String,)>) -> HttpResponse {
@@ -31,9 +39,10 @@ pub(super) async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Pat
     //After this operation the channels will be consumed.
     //The next DELETE requiest will no do anything but returning the NotFound response.
     //The Process will be removed from the Registed in the execution context.
-    let (stop_tx, exit_rx) = match reg.get_ref().write().await.get_mut(&alias) {
-        Some(p) => (p.stop_tx.take(), p.exit_rx.take()),
-        None => (None, None),
+    let (stop_tx, exit_rx) = 
+        match reg.get_ref().write().await.get_mut(&alias) {
+            Some(p) => (p.stop_tx.take(), p.exit_rx.take()),
+            None => (None, None),
     };
     stop_tx.map(|tx| tx.send(StopMessage {}).ok());
     match exit_rx {

@@ -7,6 +7,7 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProcessDescription {
+    #[serde(default = "no_alias")]
     pub alias: String,
     pub cmd: String,
     #[serde(default)]
@@ -34,6 +35,9 @@ impl ProcessDescription {
 
 }
 
+fn no_alias() -> String {
+    "".to_string()
+}
 fn default_work_dir() -> String {
     ".".to_string()
 }
