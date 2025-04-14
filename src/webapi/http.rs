@@ -75,3 +75,11 @@ pub(super) async fn try_get_status(reg: Data<RegisterRef>, Path((alias,)): Path<
         }
     }
 }
+
+pub(super) async fn try_get_status_all(reg: Data<RegisterRef>) -> HttpResponse {
+    debug!("GET for all");
+
+    let all = reg.get_ref().read().await.get_all_desc();
+    debug!("GET all processes {:?}", all);
+    HttpResponse::Ok().json(all)
+}

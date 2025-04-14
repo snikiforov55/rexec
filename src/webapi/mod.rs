@@ -30,7 +30,7 @@ pub fn create_server(config: Arc<Config>, reg: RegisterRef) -> std::io::Result<a
             )
             .service(
                 web::resource("/process")
-                    .route(web::get().to(http::try_get_status)),
+                    .route(web::get().to(http::try_get_status_all)),
             )
         // .service(
         //     web::resource("/extractor2")
