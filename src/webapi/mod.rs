@@ -2,6 +2,7 @@
  * Copyright (c) 2020-2025. Stanislav Nikiforov
  */
 mod http;
+mod files;
 
 use std::sync::Arc;
 use actix_web::web;
@@ -22,16 +23,10 @@ pub fn create_server(config: Arc<Config>, reg: RegisterRef) -> std::io::Result<a
             .app_data(Data::new(cfg.clone()))
             .app_data(Data::new(reg.clone()))
             .app_data(web::JsonConfig::default().limit(json_default_limit)) //limit size of the payload (global configuration)
-            .service(
-                web::resource("/process/{alias}")
-                    .route(web::post().to(http::try_create_process))
-                    .route(web::delete().to(http::try_stop_process))
-                    .route(web::get().to(http::try_get_status)),
-            )
-            .service(
-                web::resource("/process")
-                    .route(web::get().to(http::try_get_status_all)),
-            )
+            .configure(http::configure_http)
+            // .service(Files::new(
+            //     "/process/{alias}/log/list", 
+            //     &cfg.path.log_dir).show_files_listing())
         // .service(
         //     web::resource("/extractor2")
         //         .app_data(web::JsonConfig::default().limit(1024)) // <- limit size of the payload (resource level)
@@ -44,9 +39,4 @@ pub fn create_server(config: Arc<Config>, reg: RegisterRef) -> std::io::Result<a
     .run();
     Ok(out)
 }
-#[cfg(test)]
-mod web_api_tests {
-    #[test]
-    fn test_parse_body_full() {
-    }
-}
+

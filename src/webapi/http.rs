@@ -1,48 +1,77 @@
-use std::sync::Arc;
-use actix_web::web::{self, Data, JsonBody};
+use actix_web::{web, web::Data};
 use actix_web::HttpResponse;
-use actix_web_lab::extract::Path;
 use log::debug;
+use std::sync::Arc;
 use tokio::time::Duration;
 
 use crate::exec::execute::start;
-use crate::proc::description::ProcessDescription;
 use crate::proc::comm::StopMessage;
+use crate::proc::description::ProcessDescription;
 use crate::register::RegisterRef;
 use crate::util::config::Config;
+use super::files;
 
+pub(super) fn configure_http(cfg: &mut web::ServiceConfig){
+    cfg.service(
+web::scope("/process")
+            .service(
+        web::resource("")
+                    .route(web::get().to(try_get_status_all)),
+            )
+            .service(
+        web::scope("/{alias}")
+                .service(web::resource("")
+                    .route(web::post().to(try_create_process))
+                    .route(web::delete().to(try_stop_process))
+                    .route(web::get().to(try_get_status)),
+                )
+                .service(
+                web::scope("/log")
+                    .service(web::resource("")
+                        .route(web::get().to(files::nope)),
+                    )
+                    .service(web::resource("/last")
+                         .route(web::get().to(files::nope)),
+                    )
+                    .service(web::resource("/{id}")
+                        .route(web::get().to(files::list_log_files)),
+                    )
+                ),
+            ),
+    );
+}
 pub(super) async fn try_create_process(
     conf: Data<Arc<Config>>,
     reg: Data<RegisterRef>,
     item: web::Json<ProcessDescription>,
-    Path((alias,)): Path<(String,)>,
+    alias: web::Path<String>,
 ) -> HttpResponse {
     debug!("POST for alias {alias} for \n{:?}", item);
     let mut i = item.into_inner();
-    i.alias = alias;
+    i.alias = alias.to_string();
     if i.alias.is_empty() {
         HttpResponse::InternalServerError().body("Invalid alias provided.")
-    }
-    else{
-        match start(conf.get_ref(), reg.get_ref(), &i ).await {
+    } else {
+        match start(conf.get_ref(), reg.get_ref(), &i).await {
             Ok(_) => HttpResponse::Ok().body(()),
             Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
         }
     }
-
 }
 
-pub(super) async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Path<(String,)>) -> HttpResponse {
+pub(super) async fn try_stop_process(
+    reg: Data<RegisterRef>,
+    alias: web::Path<String>,
+) -> HttpResponse {
     debug!("DELETE for alias {alias}");
 
-    //Lock the Registed for a very short time, only to get the channels.
+    //Lock the Register for a very short time, only to get the channels.
     //After this operation the channels will be consumed.
-    //The next DELETE requiest will no do anything but returning the NotFound response.
+    //The next DELETE request will no do anything but returning the NotFound response.
     //The Process will be removed from the Registed in the execution context.
-    let (stop_tx, exit_rx) = 
-        match reg.get_ref().write().await.get_mut(&alias) {
-            Some(p) => (p.stop_tx.take(), p.exit_rx.take()),
-            None => (None, None),
+    let (stop_tx, exit_rx) = match reg.get_ref().write().await.get_mut(&alias) {
+        Some(p) => (p.stop_tx.take(), p.exit_rx.take()),
+        None => (None, None),
     };
     stop_tx.map(|tx| tx.send(StopMessage {}).ok());
     match exit_rx {
@@ -65,8 +94,10 @@ pub(super) async fn try_stop_process(reg: Data<RegisterRef>, Path((alias,)): Pat
     }
 }
 
-
-pub(super) async fn try_get_status(reg: Data<RegisterRef>, Path((alias,)): Path<(String,)>) -> HttpResponse {
+pub(super) async fn try_get_status(
+    reg: Data<RegisterRef>,
+    alias: web::Path<String>,
+) -> HttpResponse {
     debug!("GET for alias {alias}");
 
     let info = match reg.get_ref().read().await.get(&alias) {
