@@ -68,12 +68,19 @@ pub(super) async fn send_file(conf: &FsConfig, path: PathBuf) -> HttpResponse {
 }
 
 pub(super) fn configure_files(service_cfg: &mut web::ServiceConfig) {
-    let scope = web::scope("/fs").service(web::resource(format!("{{alias}}/{{file}}")).route(
+    let scope = web::scope("/fs").service(web::resource(format!("{{alias}}/{{file}}*")).route(
         web::get().to(
-            async move |cfg: Data<Arc<Config>>, index: web::Path<(String, String)>| {
+            async move |cfg: Data<Arc<Config>>, index: web::Path<(String,String)>| {
                 match cfg.get_ref().fs.entries.get(&index.0) {
-                    None => HttpResponse::NotFound().finish(),
+                    None => {
+                        debug!("Path alias {} not found", &index.0);
+                        HttpResponse::NotFound().finish()
+                    },
                     Some(dir) => {
+                        if index.1.contains(".."){ 
+                            debug!("Attempting invalid filename {}", index.1);
+                            return HttpResponse::Forbidden().finish()
+                        }
                         let mut d = dir.clone();
                         d.push(&index.1);
                         send_file(&cfg.get_ref().fs, d).await
