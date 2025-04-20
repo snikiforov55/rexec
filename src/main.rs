@@ -2,7 +2,7 @@
  * Copyright (c) 2020. Stanislav Nikiforov
  */
 
-use log::{info, error};
+use log::{info, debug};
 use register::create_register_ref;
 use simplelog::*;
 use std::{fs::File, sync::Arc};
@@ -47,6 +47,8 @@ fn main() {
         port: {}",
           &config.net.ip,
           &config.net.port);
+
+    debug!("Full config:\n{:?}", &config);
 
     let register = create_register_ref();
     let conf_ref = Arc::new(config);

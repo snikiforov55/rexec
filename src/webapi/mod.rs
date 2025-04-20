@@ -24,6 +24,7 @@ pub fn create_server(config: Arc<Config>, reg: RegisterRef) -> std::io::Result<a
             .app_data(Data::new(reg.clone()))
             .app_data(web::JsonConfig::default().limit(json_default_limit)) //limit size of the payload (global configuration)
             .configure(http::configure_http)
+            .configure(files::configure_files)
             // .service(Files::new(
             //     "/process/{alias}/log/list", 
             //     &cfg.path.log_dir).show_files_listing())

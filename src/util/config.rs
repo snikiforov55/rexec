@@ -2,45 +2,48 @@
  * Copyright (c) 2020. Stanislav Nikiforov
  */
 
-use std::path::PathBuf;
-
 use clap::{command, Arg};
-use serde_json::to_string;
-#[derive(Clone)]
-pub struct IoConfig{
+use std::{collections::HashMap, path::PathBuf};
+#[derive(Clone,Debug)]
+pub struct IoConfig {
     pub stdin_capasity: usize,
     pub bcast_capasity: usize,
 }
-#[derive(Clone)]
-pub struct NetConfig{
+#[derive(Clone,Debug)]
+pub struct NetConfig {
     pub ip: String,
     pub port: u16,
     pub json_default_limit: usize,
 }
 
-#[derive(Clone)]
-pub enum LogTimeStamp{
+#[derive(Clone,Debug)]
+pub enum LogTimeStamp {
     Sec,
     Min,
     Hour,
-    Day
+    Day,
 }
-#[derive(Clone)]
-pub struct PathConfig{
+#[derive(Clone,Debug)]
+pub struct PathConfig {
     pub install_dir: PathBuf,
     pub log_dir: PathBuf,
     pub config_dir: PathBuf,
     pub max_log_files: usize,
     pub log_timestamp: LogTimeStamp,
 }
-#[derive(Clone)]
+#[derive(Clone,Debug)]
+pub struct FsConfig {
+    pub entries: HashMap<String, PathBuf>,
+    pub chunk_size: usize,
+}
+#[derive(Clone,Debug)]
 pub struct Config {
     pub verbosity_level: String,
     pub path: PathConfig,
     pub net: NetConfig,
     pub io: IoConfig,
+    pub fs: FsConfig,
 }
-
 
 impl Config {
     pub fn from_env() -> Self {
@@ -78,20 +81,21 @@ impl Config {
             )
             .get_matches();
         let install_dir = matches
-        .get_one::<String>("install-directory")
-        .map(|s| PathBuf::from(s))
-        .or_else(|| {
-            std::env::current_exe()
-                .ok()
-                .map(|mut p| {p.pop(); p})// chop the executable name
-        })
-        .unwrap_or(PathBuf::from("."));
+            .get_one::<String>("install-directory")
+            .map(|s| PathBuf::from(s))
+            .or_else(|| {
+                std::env::current_exe().ok().map(|mut p| {
+                    p.pop();
+                    p
+                }) // chop the executable name
+            })
+            .unwrap_or(PathBuf::from("."));
         Config {
             verbosity_level: matches
                 .get_one::<String>("log-level")
                 .unwrap_or(&"debug".to_string())
                 .to_string(),
-            net:NetConfig{
+            net: NetConfig {
                 ip: matches
                     .get_one::<String>("ip")
                     .unwrap_or(&"0.0.0.0".to_string())
@@ -100,22 +104,44 @@ impl Config {
                 json_default_limit: 4096,
             },
             path: PathConfig {
-                log_dir: {let mut p = install_dir.clone();
+                log_dir: {
+                    let mut p = install_dir.clone();
                     p.push("var");
                     p.push("log");
                     p
-                }, 
-                config_dir: {let mut p = install_dir.clone();
+                },
+                config_dir: {
+                    let mut p = install_dir.clone();
                     p.push("etc");
                     p
-                }, 
-                install_dir,
-                max_log_files: 5, 
-                log_timestamp: LogTimeStamp::Day 
+                },
+                install_dir: install_dir.clone(),
+                max_log_files: 5,
+                log_timestamp: LogTimeStamp::Day,
             },
-            io: IoConfig { 
-                stdin_capasity: 32, 
-                bcast_capasity: 128 }
+            io: IoConfig {
+                stdin_capasity: 32,
+                bcast_capasity: 128,
+            },
+            fs: FsConfig{
+                entries: HashMap::from([
+                    ("foo".to_string(),{
+                        let mut foo = install_dir.clone();
+                        foo.push("var");
+                        foo.push("fs");
+                        foo.push("foo");
+                        foo
+                    }),
+                    ("bar".to_string(),{
+                        let mut bar = install_dir.clone();
+                        bar.push("var");
+                        bar.push("fs");
+                        bar.push("bar");
+                        bar
+                    })
+                ]),
+                chunk_size: 1000 * 1024,
+            },
         }
     }
 }
