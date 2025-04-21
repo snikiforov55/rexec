@@ -28,13 +28,13 @@ web::scope("/process")
                 .service(
                 web::scope("/log")
                     .service(web::resource("")
-                        .route(web::get().to(files::nope)),
+                        .route(web::get().to(files::send::nope)),
                     )
                     .service(web::resource("/last")
-                         .route(web::get().to(files::nope)),
+                         .route(web::get().to(files::send::nope)),
                     )
                     .service(web::resource("/{id}")
-                        .route(web::get().to(files::list_log_files)),
+                        .route(web::get().to(files::send::list_log_files)),
                     )
                 ),
             ),

@@ -2,28 +2,29 @@
  * Copyright (c) 2020. Stanislav Nikiforov
  */
 
+use actix_web::dev::Path;
 use clap::{command, Arg};
 use std::{collections::HashMap, path::PathBuf};
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct IoConfig {
     pub stdin_capasity: usize,
     pub bcast_capasity: usize,
 }
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct NetConfig {
     pub ip: String,
     pub port: u16,
     pub json_default_limit: usize,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub enum LogTimeStamp {
     Sec,
     Min,
     Hour,
     Day,
 }
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct PathConfig {
     pub install_dir: PathBuf,
     pub log_dir: PathBuf,
@@ -31,12 +32,14 @@ pub struct PathConfig {
     pub max_log_files: usize,
     pub log_timestamp: LogTimeStamp,
 }
-#[derive(Clone,Debug)]
+pub type UrlPathMap = HashMap<String, PathBuf>;
+#[derive(Clone, Debug)]
 pub struct FsConfig {
-    pub entries: HashMap<String, PathBuf>,
+    pub entries: UrlPathMap,
     pub chunk_size: usize,
+    pub metadata_limit: usize,
 }
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub verbosity_level: String,
     pub path: PathConfig,
@@ -46,6 +49,57 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn new() -> Self {
+        let install_dir = PathBuf::from(".");
+        Self {
+            verbosity_level: "debug".to_string(),
+            net: NetConfig {
+                ip: "0.0.0.0".to_string(),
+                port: 8910,
+                json_default_limit: 4096,
+            },
+            path: PathConfig {
+                log_dir: {
+                    let mut p = install_dir.clone();
+                    p.push("var");
+                    p.push("log");
+                    p
+                },
+                config_dir: {
+                    let mut p = install_dir.clone();
+                    p.push("etc");
+                    p
+                },
+                install_dir: install_dir.clone(),
+                max_log_files: 5,
+                log_timestamp: LogTimeStamp::Day,
+            },
+            io: IoConfig {
+                stdin_capasity: 32,
+                bcast_capasity: 128,
+            },
+            fs: FsConfig {
+                entries: HashMap::from([
+                    ("foo".to_string(), {
+                        let mut foo = install_dir.clone();
+                        foo.push("var");
+                        foo.push("fs");
+                        foo.push("foo");
+                        foo
+                    }),
+                    ("bar".to_string(), {
+                        let mut bar = install_dir.clone();
+                        bar.push("var");
+                        bar.push("fs");
+                        bar.push("bar");
+                        bar
+                    }),
+                ]),
+                chunk_size: 1000 * 1024,
+                metadata_limit: 1024,
+            },
+        }
+    }
     pub fn from_env() -> Self {
         let matches = command!("rexec")
             .version(clap::crate_version!())
@@ -123,24 +177,25 @@ impl Config {
                 stdin_capasity: 32,
                 bcast_capasity: 128,
             },
-            fs: FsConfig{
+            fs: FsConfig {
                 entries: HashMap::from([
-                    ("foo".to_string(),{
+                    ("foo".to_string(), {
                         let mut foo = install_dir.clone();
                         foo.push("var");
                         foo.push("fs");
                         foo.push("foo");
                         foo
                     }),
-                    ("bar".to_string(),{
+                    ("bar".to_string(), {
                         let mut bar = install_dir.clone();
                         bar.push("var");
                         bar.push("fs");
                         bar.push("bar");
                         bar
-                    })
+                    }),
                 ]),
                 chunk_size: 1000 * 1024,
+                metadata_limit: 1024,
             },
         }
     }

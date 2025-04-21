@@ -1,93 +1,160 @@
+use actix_multipart::Multipart;
 use actix_web::{
-    http::header::ContentType,
-    web::{self, Bytes, Data},
-    Error, HttpResponse,
+    web::{self, Data},
+    HttpResponse,
 };
-use async_stream::stream;
-use log::{debug, error};
-use std::{fs::File, io::Read, path::PathBuf, sync::Arc, vec::Vec};
+use log::debug;
+use std::{path::PathBuf, sync::Arc};
 
-use crate::{
-    error::{RexecError, RexecErrorType},
-    util::config::{Config, FsConfig},
-};
+use crate::util::config::{Config, UrlPathMap};
 
-pub(super) async fn list_log_files(
-    index: web::Path<(String, String)>,
-) -> Result<HttpResponse, Error> {
-    let (_, i) = index.into_inner();
-    debug!("list_log_files {}", i);
-    Ok(HttpResponse::Ok().finish())
-}
+mod save;
+pub mod send;
 
-pub(super) async fn nope() -> HttpResponse {
-    debug!("nope");
-    HttpResponse::Ok().finish()
-}
-
-pub(super) async fn send_file(conf: &FsConfig, path: PathBuf) -> HttpResponse {
-    debug!("Reading file: {:?}",&path);
-    let mut file = match web::block(move || File::open(path)).await {
-        Err(e) => {
-            error!("Failed to start web::block, error: {}", e);
-            return HttpResponse::InternalServerError().finish();
+fn sanitize_path(map: &UrlPathMap, url: &String, path: &String) -> Option<PathBuf> {
+    match map.get(url) {
+        None => {
+            debug!("Path alias url {} not found", url);
+            None
         }
-        Ok(Err(e)) => {
-            debug!("Failed to open file, error: {}", e);
-            return HttpResponse::Forbidden().finish();
-        }
-        Ok(Ok(f)) => f,
-    };
-    let chunk_size = conf.chunk_size;
-    let file_stream = stream! {
-        let mut chunk = vec![0u8;chunk_size];
-        loop{
-            match web::block(move || file.read(&mut chunk).map(|n| (file, n, chunk))).await{
-            Err(e) => {
-                error!("Error executing web::block: {}", e);
-                yield Result::<Bytes, RexecError>::Err(RexecError { code: RexecErrorType::FailedFileRead, message:e.to_string()});
-                break;
-            },
-            Ok(Err(e))=>{
-                debug!("Error reading file: {}", e);
-                yield Result::<Bytes, RexecError>::Err(RexecError { code: RexecErrorType::FailedFileRead, message:e.to_string()});
-                break;
+        Some(dir) => {
+            if path.contains("..") {
+                debug!("Attempting invalid filename {}", path);
+                return None;
             }
-            Ok(Ok((_,0, _)))=>break, // End of file
-            Ok(Ok((f,n,c)))=>{
-                file = f;
-                chunk = c;
-                yield Result::<Bytes, RexecError>::Ok(Bytes::from(chunk[..n].to_vec())); // Yielding the chunk here
-            },
-            }
+            let mut d = dir.clone();
+            d.push(path);
+            Some(d)
         }
-    };
-    HttpResponse::Ok()
-        .content_type(ContentType::octet_stream())
-        .streaming(file_stream)
+    }
 }
 
 pub(super) fn configure_files(service_cfg: &mut web::ServiceConfig) {
-    let scope = web::scope("/fs").service(web::resource(format!("{{alias}}/{{file}}*")).route(
-        web::get().to(
-            async move |cfg: Data<Arc<Config>>, index: web::Path<(String,String)>| {
-                match cfg.get_ref().fs.entries.get(&index.0) {
-                    None => {
-                        debug!("Path alias {} not found", &index.0);
-                        HttpResponse::NotFound().finish()
-                    },
-                    Some(dir) => {
-                        if index.1.contains(".."){ 
-                            debug!("Attempting invalid filename {}", index.1);
-                            return HttpResponse::Forbidden().finish()
+    let scope = web::scope("/fs").service(
+        web::resource(format!("{{alias}}/{{file}}*"))
+            .route(web::get().to(
+                async move |cfg: Data<Arc<Config>>, index: web::Path<(String, String)>| {
+                    match sanitize_path(&cfg.get_ref().fs.entries, &index.0, &index.1) {
+                        None => {
+                            debug!("Path alias {} not found", &index.0);
+                            HttpResponse::NotFound().finish()
                         }
-                        let mut d = dir.clone();
-                        d.push(&index.1);
-                        send_file(&cfg.get_ref().fs, d).await
+                        Some(path) => send::send_file(&cfg.get_ref().fs, path).await,
                     }
-                }
-            },
-        ),
-    ));
+                },
+            ))
+            .route(web::post().to(
+                async move |cfg: Data<Arc<Config>>,
+                            req: Multipart,
+                            path: web::Path<(String, String)>| {
+                    match sanitize_path(&cfg.get_ref().fs.entries, &path.0, &path.1) {
+                        None => {
+                            debug!("Path alias {}{} not found or malformed", path.0, path.1);
+                            HttpResponse::NotFound().finish()
+                        }
+                        Some(path) => save::save_file(&cfg.get_ref().fs, req, path).await,
+                    }
+                },
+            )),
+    );
     service_cfg.service(scope);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, io::Write, path::PathBuf, sync::Arc};
+
+    use actix_web::{
+        dev::Service,
+        http::{
+            header::{HeaderName, HeaderValue},
+            StatusCode,
+        },
+        test,
+        web::Data,
+        App,
+    };
+
+    use crate::util::config::Config;
+
+    use super::configure_files;
+
+    fn build_multipart_payload_and_header(
+        chunks: Vec<(&str, &str)>,
+    ) -> (Vec<u8>, (HeaderName, HeaderValue)) {
+        let boundary = "-----------------------------202022185716362916172375148227";
+        let mut out: Vec<u8> = vec![];
+        out.reserve(1024);
+
+        for (name, payload) in chunks {
+            out.write_all(
+                format!(
+                    "{boundary}\r\n\
+                Content-Disposition: form-data; name=\"{name}\"\r\n\
+                Content-Type: text/csv\r\n\
+                \r\n\r\n\
+                {payload}\r\n\r\n\
+                {boundary}--"
+                )
+                .as_bytes(),
+            )
+            .ok();
+        }
+        let header = (
+            actix_web::http::header::CONTENT_TYPE,
+            HeaderValue::from_static("multipart/form-data; boundary=---------------------------202022185716362916172375148227"),
+        );
+        (out, header)
+    }
+
+    #[actix_web::test]
+    async fn test_upload_file() {
+        let mut cfg = Config::new();
+        let id = uuid::Uuid::new_v4();
+        cfg.fs.entries = HashMap::from([(
+            "foo".to_string(),
+            PathBuf::from(format!("/tmp/rexec/test_{id}")),
+        )]);
+        let app = test::init_service(
+            App::new()
+                .app_data(Data::new(Arc::new(cfg)))
+                .configure(configure_files),
+        )
+        .await;
+
+        let meta = r#"{"create_dir": true, "override_file": true}"#;
+        let file = r#"{"test": "file", "example": true}"#;
+
+        let (payload, header) =
+            build_multipart_payload_and_header(vec![("meta", meta), ("file", file)]);
+
+        //print!("{:?}",String::from_utf8(payload.clone()).unwrap());
+
+        let req = test::TestRequest::post()
+            .uri("/fs/foo/test.json")
+            .insert_header(header)
+            .set_payload(payload)
+            .to_request();
+
+        let resp = app.call(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+    #[test]
+    async fn test_borrow() {
+        struct Data {
+            a: i32,
+            b: String,
+        }
+        fn use_f(f: Data) -> Data {
+            print!("{}{}", f.a, f.b);
+            f
+        }
+        let mut d = Data {
+            a: 0,
+            b: "0".to_string(),
+        };
+        d = use_f(d);
+        use_f(d);
+    }
 }
