@@ -47,12 +47,20 @@ pub(super) fn configure_files(service_cfg: &mut web::ServiceConfig) {
                 async move |cfg: Data<Arc<Config>>,
                             req: Multipart,
                             path: web::Path<(String, String)>| {
+                    println!("Path alias {} file {} ", path.0, path.1);
+                    
                     match sanitize_path(&cfg.get_ref().fs.entries, &path.0, &path.1) {
                         None => {
                             debug!("Path alias {}{} not found or malformed", path.0, path.1);
                             HttpResponse::NotFound().finish()
                         }
-                        Some(path) => save::save_file(&cfg.get_ref().fs, req, path).await,
+                        Some(path) => match save::save_file(&cfg.get_ref().fs, req, path).await{
+                            Ok(res) => res,
+                            Err(e) => {
+                                debug!("Error processing multipart request: {}", &e);
+                                HttpResponse::InternalServerError().finish()
+                            }
+                        },
                     }
                 },
             )),
@@ -94,12 +102,14 @@ mod tests {
                 Content-Type: text/csv\r\n\
                 \r\n\r\n\
                 {payload}\r\n\r\n\
-                {boundary}--"
+                "
                 )
                 .as_bytes(),
             )
             .ok();
         }
+        out.write_all(format!("{boundary}--").as_bytes());
+
         let header = (
             actix_web::http::header::CONTENT_TYPE,
             HeaderValue::from_static("multipart/form-data; boundary=---------------------------202022185716362916172375148227"),
@@ -108,12 +118,13 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn test_upload_file() {
+    async fn test_upload_and_override_file() {
         let mut cfg = Config::new();
         let id = uuid::Uuid::new_v4();
+        let dest_path = PathBuf::from(format!("/tmp/rexec/test_{id}"));
         cfg.fs.entries = HashMap::from([(
             "foo".to_string(),
-            PathBuf::from(format!("/tmp/rexec/test_{id}")),
+            dest_path.clone(),
         )]);
         let app = test::init_service(
             App::new()
@@ -128,17 +139,30 @@ mod tests {
         let (payload, header) =
             build_multipart_payload_and_header(vec![("meta", meta), ("file", file)]);
 
-        //print!("{:?}",String::from_utf8(payload.clone()).unwrap());
-
+        let file_name = "test.json";
+        let alias = "foo";
         let req = test::TestRequest::post()
-            .uri("/fs/foo/test.json")
-            .insert_header(header)
-            .set_payload(payload)
+            .uri(format!("/fs/{alias}/{file_name}").as_str())
+            .insert_header(header.clone())
+            .set_payload(payload.clone())
             .to_request();
-
         let resp = app.call(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
+
+        let mut file_path = dest_path.clone();
+        file_path.push(file_name);
+        let exists = std::fs::exists(file_path).map_err(|_|());
+        assert_eq!(exists, Ok(true));
+
+        let req = test::TestRequest::post()
+        .uri(format!("/fs/{alias}/{file_name}").as_str())
+        .insert_header(header)
+        .set_payload(payload)
+        .to_request();
+        let resp = app.call(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
     }
     #[test]
     async fn test_borrow() {
