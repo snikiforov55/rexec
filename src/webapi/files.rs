@@ -8,7 +8,8 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::util::config::{Config, UrlPathMap};
 
-mod save;
+mod save_multipart;
+mod cfg;
 pub mod send;
 
 fn sanitize_path(map: &UrlPathMap, url: &String, path: &String) -> Option<PathBuf> {
@@ -46,15 +47,14 @@ pub(super) fn configure_files(service_cfg: &mut web::ServiceConfig) {
             .route(web::post().to(
                 async move |cfg: Data<Arc<Config>>,
                             req: Multipart,
-                            path: web::Path<(String, String)>| {
-                    println!("Path alias {} file {} ", path.0, path.1);
-                    
+                            path: web::Path<(String, String)>| {                    
                     match sanitize_path(&cfg.get_ref().fs.entries, &path.0, &path.1) {
                         None => {
                             debug!("Path alias {}{} not found or malformed", path.0, path.1);
                             HttpResponse::NotFound().finish()
                         }
-                        Some(path) => match save::save_file(&cfg.get_ref().fs, req, path).await{
+                        Some(path) => match save_multipart::save_file_multipart(
+                            &cfg.get_ref().fs, req, path).await{
                             Ok(res) => res,
                             Err(e) => {
                                 debug!("Error processing multipart request: {}", &e);
