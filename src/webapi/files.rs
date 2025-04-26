@@ -9,6 +9,7 @@ use std::{path::PathBuf, sync::Arc};
 use crate::util::config::{Config, UrlPathMap};
 
 mod save_multipart;
+mod save_single;
 mod cfg;
 pub mod send;
 
