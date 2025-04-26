@@ -1,6 +1,6 @@
 
 use actix_web::{
-    http::{header::ContentType, Error},
+    http::{header::{self, ContentType}, Error},
     web::{self, Bytes},
     HttpResponse,
 };
@@ -28,7 +28,14 @@ pub(crate) async fn nope() -> HttpResponse {
 
 pub(super) async fn send_file(conf: &FsConfig, path: PathBuf) -> HttpResponse {
     debug!("Reading file: {:?}",&path);
-    let mut file = match web::block(move || File::open(path)).await {
+    let (mut file, size) = match web::block(move || 
+        File::open(path)
+        .and_then(|f| 
+            f
+            .metadata()
+            .map(|meta| (f,meta.len()))
+        )
+    ).await {
         Err(e) => {
             error!("Failed to start web::block, error: {}", e);
             return HttpResponse::InternalServerError().finish();
