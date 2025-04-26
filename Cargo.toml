@@ -20,5 +20,6 @@ async-stream = "0.3.6"
 actix-web = "4"
 actix-multipart = "0.7.2"
 uuid = { version = "1.16.0", features = ["v4"]}
+mime = "0.3.17"
 
 

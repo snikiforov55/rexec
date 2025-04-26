@@ -1,12 +1,15 @@
 use actix_multipart::Multipart;
 use actix_web::{
-    web::{self, Data},
-    HttpResponse,
+    guard::{self, Guard, GuardContext}, http::header, web::{self, Data}, Error, FromRequest, HttpRequest, HttpResponse
 };
+use cfg::SaveOptions;
 use log::debug;
-use std::{path::PathBuf, sync::Arc};
+use mime::Mime;
+use save_multipart::save_file_multipart;
+use save_single::save_file_single;
+use std::{future::{Future}, path::PathBuf, sync::Arc};
 
-use crate::util::config::{Config, UrlPathMap};
+use crate::util::config::{Config, FsConfig, UrlPathMap};
 
 mod save_multipart;
 mod save_single;
@@ -30,6 +33,42 @@ fn sanitize_path(map: &UrlPathMap, url: &String, path: &String) -> Option<PathBu
         }
     }
 }
+struct ContentTypeMultipart;
+
+impl Guard for ContentTypeMultipart {
+    fn check(&self, req: &GuardContext) -> bool {
+        req.head()
+            .headers()
+            .get(&header::CONTENT_TYPE)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|v| v.parse::<Mime>().ok())
+            .map(|mime| mime.type_() == mime::MULTIPART)
+            .unwrap_or(false)
+    }
+}
+
+
+async fn save_file<R, F, Fut>(conf: Arc<Config>, req: R, path: web::Path<(String, String)>, mut handler: F)-> HttpResponse
+    where 
+        F: FnMut(&FsConfig,R,PathBuf) -> Fut,
+        R: FromRequest + 'static,
+        Fut: Future<Output = Result<HttpResponse,Error>>
+{
+    match sanitize_path(&conf.fs.entries, &path.0, &path.1) {
+        None => {
+            debug!("Path alias {}{} not found or malformed", path.0, path.1);
+            HttpResponse::NotFound().finish()
+        }
+        Some(path) => {
+            match handler(&conf.fs, req, path).await{
+            Ok(res) => res,
+            Err(e) => {
+                debug!("Error processing multipart request: {}", &e);
+                HttpResponse::InternalServerError().finish()
+            }
+        }},
+    }
+}
 
 pub(super) fn configure_files(service_cfg: &mut web::ServiceConfig) {
     let scope = web::scope("/fs").service(
@@ -45,26 +84,51 @@ pub(super) fn configure_files(service_cfg: &mut web::ServiceConfig) {
                     }
                 },
             ))
-            .route(web::post().to(
-                async move |cfg: Data<Arc<Config>>,
-                            req: Multipart,
-                            path: web::Path<(String, String)>| {                    
+            .route(web::route()
+                .guard(guard::Post())
+                .guard(ContentTypeMultipart)
+                .to(async move |cfg: Data<Arc<Config>>,
+                    req: Multipart,
+                    path: web::Path<(String, String)>| {                
+                        match sanitize_path(&cfg.get_ref().fs.entries, &path.0, &path.1) {
+                            None => {
+                                debug!("Path alias {}{} not found or malformed", path.0, path.1);
+                                HttpResponse::NotFound().finish()
+                            }
+                            Some(path) => match save_multipart::save_file_multipart(
+                                &cfg.get_ref().fs, req, path).await{
+                                Ok(res) => res,
+                                Err(e) => {
+                                    debug!("Error processing multipart request: {}", &e);
+                                    HttpResponse::InternalServerError().finish()
+                                }
+                            },
+                        }
+                })
+            )
+            .route(web::route()
+                .guard(guard::Post())
+                .to(async move |
+                    cfg: Data<Arc<Config>>, 
+                    req: web::Payload, 
+                    path: web::Path<(String, String)>,
+                    query: web::Query<SaveOptions>, |{
                     match sanitize_path(&cfg.get_ref().fs.entries, &path.0, &path.1) {
                         None => {
                             debug!("Path alias {}{} not found or malformed", path.0, path.1);
                             HttpResponse::NotFound().finish()
                         }
-                        Some(path) => match save_multipart::save_file_multipart(
-                            &cfg.get_ref().fs, req, path).await{
+                        Some(path) => match save_single::save_file_single(
+                            req, path, query).await{
                             Ok(res) => res,
                             Err(e) => {
-                                debug!("Error processing multipart request: {}", &e);
+                                debug!("Error processing single request: {}", &e);
                                 HttpResponse::InternalServerError().finish()
                             }
                         },
                     }
-                },
-            )),
+                }
+            ))
     );
     service_cfg.service(scope);
 }
@@ -181,5 +245,52 @@ mod tests {
         };
         d = use_f(d);
         use_f(d);
+    }
+    #[actix_web::test]
+    async fn test_upload_and_override_single_file() {
+        let mut cfg = Config::new();
+        let id = uuid::Uuid::new_v4();
+        let dest_path = PathBuf::from(format!("/tmp/rexec/test_{id}"));
+        cfg.fs.entries = HashMap::from([(
+            "foo".to_string(),
+            dest_path.clone(),
+        )]);
+        let app = test::init_service(
+            App::new()
+                .app_data(Data::new(Arc::new(cfg)))
+                .configure(configure_files),
+        )
+        .await;
+
+        let meta = r#"{"create_dir": true, "override_file": true}"#;
+        let file = r#"{"test": "file", "example": true}"#;
+
+        let (payload, header) =
+            build_multipart_payload_and_header(vec![("meta", meta), ("file", file)]);
+
+        let file_name = "test.json";
+        let alias = "foo";
+        let req = test::TestRequest::post()
+            .uri(format!("/fs/{alias}/{file_name}").as_str())
+            .insert_header(header.clone())
+            .set_payload(payload.clone())
+            .to_request();
+        let resp = app.call(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let mut file_path = dest_path.clone();
+        file_path.push(file_name);
+        let exists = std::fs::exists(file_path).map_err(|_|());
+        assert_eq!(exists, Ok(true));
+
+        let req = test::TestRequest::post()
+        .uri(format!("/fs/{alias}/{file_name}").as_str())
+        .insert_header(header)
+        .set_payload(payload)
+        .to_request();
+        let resp = app.call(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
     }
 }
