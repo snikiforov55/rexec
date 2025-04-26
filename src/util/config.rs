@@ -38,6 +38,7 @@ pub struct FsConfig {
     pub entries: UrlPathMap,
     pub chunk_size: usize,
     pub metadata_limit: usize,
+    pub max_file: usize,
 }
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -97,6 +98,7 @@ impl Config {
                 ]),
                 chunk_size: 1000 * 1024,
                 metadata_limit: 1024,
+                max_file: 8_000_000*1024, // 8Gb by default
             },
         }
     }
@@ -196,6 +198,7 @@ impl Config {
                 ]),
                 chunk_size: 1000 * 1024,
                 metadata_limit: 1024,
+                max_file: 8_000_000*1024, // 8Gb by default
             },
         }
     }

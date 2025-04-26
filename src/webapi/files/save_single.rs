@@ -1,18 +1,22 @@
 use std::{fs::File, io::Write, path::PathBuf};
 
-use actix_web::{web, Error, HttpResponse};
+use actix_web::{error::ErrorInternalServerError, web, Error, HttpResponse};
 use futures_util::StreamExt;
-use log::debug;
+use log::{debug, error};
 
-use crate::webapi::files::cfg::SaveOptions;
+use crate::{util::config::FsConfig, webapi::files::cfg::SaveOptions};
 
 pub(super) async fn save_file_single(
+    conf: &FsConfig,
     mut req: web::Payload,
     path: PathBuf,
-    config: web::Query<SaveOptions>,
+    config: Option<web::Query<SaveOptions>>,
 ) -> Result<HttpResponse, Error> {
 
-    let config = config.into_inner();
+    let config = config
+        .map(|c|c.into_inner())
+        .unwrap_or(SaveOptions::default());
+
 
     debug!("Saving file from a single shot request: {:?}, save config: {:?}", &path, &config);
 
@@ -32,13 +36,20 @@ pub(super) async fn save_file_single(
             .truncate(true)
             .write(true)
             .create(true)
-            .create_new(!config.replace_file.unwrap_or(false))
+            .create_new(!config.replace_file.unwrap_or(true))
             .open(path_ref.as_path())
     })
     .await??;
 
+    let mut saved_bytes: usize = 0;
     while let Some(chunk) = req.next().await {
         let chunk = chunk?;
+        saved_bytes += chunk.len();
+        if saved_bytes > conf.max_file {
+            drop(file);
+            error!("Payload it too large for file {:?}", &path);
+            return Err(ErrorInternalServerError(""))
+        }
         let (f, r) = web::block(move || {
             let res = file.write_all(&chunk);
             (file, res)

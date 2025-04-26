@@ -8,8 +8,8 @@ pub(super) struct SaveOptions {
 impl SaveOptions {
     pub fn default() -> SaveOptions {
         Self {
-            create_dir: Some(true),
-            replace_file: Some(false),
+            create_dir: Some(false),
+            replace_file: Some(true),
         }
     }
 }

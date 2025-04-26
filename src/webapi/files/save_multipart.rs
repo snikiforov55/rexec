@@ -1,5 +1,5 @@
 use actix_multipart::{Field, Multipart, MultipartError};
-use actix_web::{Error, web, HttpResponse};
+use actix_web::{error::ErrorInternalServerError, web, Error, HttpResponse};
 use futures_util::TryStreamExt;
 use log::{debug, error};
 use std::{fs::File, io::Write, path::PathBuf};
@@ -9,16 +9,23 @@ use crate::{
     webapi::files::cfg::SaveOptions,
 };
 
-async fn write_chunks(mut field: Field, mut file: File) -> Result<File, Error> {
+async fn write_chunks(mut field: Field, mut file: File, mut saved_bytes: usize, max_file: usize) -> Result<(File, usize), Error> {
     while let Some(chunk) = field.try_next().await? {
+        saved_bytes += chunk.len();
+        if saved_bytes > max_file {
+
+            error!("Multipart Payload size is too large");
+            return Err(ErrorInternalServerError(""))
+        }
         let (f, r) = web::block(move || {
             let res = file.write_all(&chunk);
             (file, res)
         }).await?;
         file = f;
+        
         if let Err(e) = r {return Err(e.into())}
     }
-    Ok(file)
+    Ok((file, saved_bytes))
 }
 
 async fn metadata(mut field: Field, limit: usize) -> Result<(Option<Field>, SaveOptions), Error> {
@@ -68,12 +75,17 @@ pub(super) async fn save_file_multipart(conf: &FsConfig,mut mp: Multipart,path: 
     })
     .await??;
 
+    let mut saved_bytes :usize = 0;
     if let Some(field) = field {
-        file = write_chunks(field, file).await?;
+        let (f, s) = write_chunks(field, file, saved_bytes, conf.max_file).await?;
+        file = f;
+        saved_bytes = s;
     }
     // write content
     while let Some(field) = mp.try_next().await? {
-        file = write_chunks(field, file).await?;
+        let (f,s) = write_chunks(field, file, saved_bytes, conf.max_file).await?;
+        file = f;
+        saved_bytes = s;
     }
     let _ = file.flush();
     //reply
