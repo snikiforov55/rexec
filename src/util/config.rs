@@ -2,6 +2,7 @@
  * Copyright (c) 2020. Stanislav Nikiforov
  */
 
+mod files;
 use clap::{command, Arg};
 use std::{collections::HashMap, path::PathBuf};
 #[derive(Clone, Debug)]
