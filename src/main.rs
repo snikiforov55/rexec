@@ -18,7 +18,7 @@ use util::config::Config;
 
 
 fn main() {
-    let config = Config::from_env();
+    let config = Config::new().apply_commanline();
 
     let log_level = match config.verbosity_level.to_lowercase().as_str(){
         "trace" => LevelFilter::Trace,

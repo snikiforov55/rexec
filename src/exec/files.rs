@@ -60,7 +60,8 @@ impl FileInfo {
         return format!("{}-utc-{}.log", alias, time_stamp_day());
     }
     async fn rotate_files(alias: &String, conf: &PathConfig) -> Result<PathBuf, RexecError> {
-        let mut path = conf.log_dir.clone();
+        let mut path = conf.install_dir.clone();
+        path.push(&conf.log_dir);
         path.push(alias);
 
         debug!("Log directory: {:?}", path);
