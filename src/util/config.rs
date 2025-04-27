@@ -112,7 +112,7 @@ impl Config {
             },
         }
     }
-    pub fn apply_commanline(mut self) -> Self {
+    pub fn apply_commandline(mut self) -> Self {
         let matches = command!("rexec")
             .version(clap::crate_version!())
             .author(clap::crate_authors!())
