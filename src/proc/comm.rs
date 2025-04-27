@@ -33,7 +33,32 @@ pub struct Process{
     pub bcst_rx: broadcast::Receiver<String>,
     pub stdin_tx: mpsc::Sender<String>,
 }
+struct ProcessIo{
 
+}
+impl Process{
+    pub fn from(desc: ProcessDescription) -> (){
+        /*
+            let fileinfo = FileInfo::next_file(&desc.alias, &conf.path).await?;
+    debug!("filename {:?}", fileinfo.filename);
+
+    let (stop_tx, stop_rx) = oneshot::channel::<StopMessage>();
+    let (exit_tx, exit_rx) = oneshot::channel::<ExitMessage>();
+    let (stdin_tx, stdin_rx) = mpsc::channel::<String>(conf.io.stdin_capasity);
+    let (bcst_tx, bcst_rx) = broadcast::channel::<String>(conf.io.bcast_capasity);
+
+    let proc = Process {
+        desc: desc.clone(),
+        status: ProcessStatusId::New,
+        filename: fileinfo.filename.clone(),
+        stop_tx: Some(stop_tx),
+        exit_rx: Some(exit_rx),
+        bcst_rx,
+        stdin_tx,
+    };
+         */
+    }
+}
 impl std::fmt::Display for Process{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("Process\ndesc:{:#?}\nfilename:{:#?}",self.desc, self.filename))?;

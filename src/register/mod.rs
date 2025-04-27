@@ -6,7 +6,7 @@ use std::{collections::HashMap, sync::Arc};
 use log::debug;
 use tokio::sync::RwLock;
 
-use crate::proc::{comm::Process, description::ProcessDescription};
+use crate::{error::{RexecError, RexecErrorType}, proc::{comm::Process, description::ProcessDescription}};
 
 pub struct Register {
     procs: HashMap<String, Process>,
@@ -20,6 +20,11 @@ impl Register {
     pub fn add(&mut self, proc: Process) {
         debug!("Add process {proc}");
         self.procs.insert(proc.desc.alias.clone(), proc);
+    }
+    pub fn check_add(&mut self, desc: &ProcessDescription) -> Result<Process, RexecError>{
+        if self.procs.get(&desc.alias).is_some() {return Err(RexecError::code(RexecErrorType::AlreadyRunning))}
+        
+        Err(RexecError::code(RexecErrorType::AlreadyRunning))
     }
     pub fn get(&self, alias: &String) -> Option<&Process> {
         self.procs.get(alias)
