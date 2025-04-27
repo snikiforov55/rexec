@@ -1,12 +1,10 @@
 
 use actix_web::{
-    http::{header::{self, ContentType}, Error},
-    web::{self, Bytes},
-    HttpResponse,
+    Error, http::{header::{self, ContentType}}, web::{self, Bytes}, HttpResponse
 };
 use async_stream::stream;
 use log::{debug, error};
-use std::{fs::File, io::Read, path::PathBuf};
+use std::{convert::TryInto, fs::File, io::{Read, Seek}, path::PathBuf};
 
 use crate::{
     error::{RexecError, RexecErrorType},
@@ -26,27 +24,7 @@ pub(crate) async fn nope() -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
-pub(super) async fn send_file(conf: &FsConfig, path: PathBuf) -> HttpResponse {
-    debug!("Reading file: {:?}",&path);
-    let (mut file, size) = match web::block(move || 
-        File::open(path)
-        .and_then(|f| 
-            f
-            .metadata()
-            .map(|meta| (f,meta.len()))
-        )
-    ).await {
-        Err(e) => {
-            error!("Failed to start web::block, error: {}", e);
-            return HttpResponse::InternalServerError().finish();
-        }
-        Ok(Err(e)) => {
-            debug!("Failed to open file, error: {}", e);
-            return HttpResponse::Forbidden().finish();
-        }
-        Ok(Ok(f)) => f,
-    };
-    let chunk_size = conf.chunk_size;
+async fn send_file_stream(mut file: File, chunk_size: usize)->Result<HttpResponse, Error>{
     let file_stream = stream! {
         let mut chunk = vec![0u8;chunk_size];
         loop{
@@ -70,7 +48,53 @@ pub(super) async fn send_file(conf: &FsConfig, path: PathBuf) -> HttpResponse {
             }
         }
     };
-    HttpResponse::Ok()
+    Ok(HttpResponse::Ok()
         .content_type(ContentType::octet_stream())
-        .streaming(file_stream)
+        .streaming(file_stream))
+}
+
+async fn send_file_chunk(mut file: File, chunk_size: usize)->Result<HttpResponse, Error>{
+    let (ch, size) = web::block(move || {
+        let mut chunk = vec![0u8;chunk_size];
+        file.read_to_end(&mut chunk).map(|s| (chunk, s))
+    }).await??;
+
+    Ok(HttpResponse::Ok()
+        .content_type(ContentType::json())
+        .body(ch[..size].to_vec())
+    )
+}
+
+pub(super) async fn send_file(conf: &FsConfig, path: PathBuf) -> HttpResponse {
+    debug!("Reading file: {:?}",&path);
+    let (file, size) = match web::block(move || 
+        File::open(path)
+        .and_then(|f| 
+            f
+            .metadata()
+            .map(|meta| {
+                let size : usize = meta.len().try_into().unwrap();
+                (f,size)
+            })
+        )
+    ).await {
+        Err(e) => {
+            error!("Failed to start web::block, error: {}", e);
+            return HttpResponse::InternalServerError().finish();
+        }
+        Ok(Err(e)) => {
+            debug!("Failed to open file, error: {}", e);
+            return HttpResponse::Forbidden().finish();
+        }
+        Ok(Ok(f)) => f,
+    };
+    let out = if size > conf.max_single_chunk {send_file_stream(file, conf.chunk_size).await}
+                                           else {send_file_chunk(file, conf.chunk_size).await};
+    match out{
+        Ok(res) => res,
+        Err(e) => {
+            error!("Send file failed: {e}");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
 }
