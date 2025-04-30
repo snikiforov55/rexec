@@ -4,25 +4,26 @@
 
 mod files;
 use clap::{command, Arg};
+use log::error;
 use std::{collections::HashMap, path::PathBuf};
-#[derive(Clone, Debug)]
-pub struct IoConfig {
-    pub stdin_capasity: usize,
-    pub bcast_capasity: usize,
-}
+
 #[derive(Clone, Debug)]
 pub struct NetConfig {
     pub ip: String,
     pub port: u16,
     pub json_default_limit: usize,
 }
-
 #[derive(Clone, Debug)]
 pub enum LogTimeStamp {
     Sec,
     Min,
     Hour,
     Day,
+}
+#[derive(Clone, Debug)]
+pub struct IoConfig {
+    pub stdin_capasity: usize,
+    pub bcast_capasity: usize,
 }
 #[derive(Clone, Debug)]
 pub struct PathConfig {
@@ -44,7 +45,6 @@ pub struct FsConfig {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub verbosity_level: String,
-    pub install_dir: PathBuf,
     pub path: PathConfig,
     pub net: NetConfig,
     pub io: IoConfig,
@@ -63,7 +63,6 @@ impl Config {
 
         Self {
             verbosity_level: "debug".to_string(),
-            install_dir: install_dir.clone(),
             net: NetConfig {
                 ip: "0.0.0.0".to_string(),
                 port: 8910,
@@ -139,18 +138,27 @@ impl Config {
                     .help("Sets the level of verbosity")
                     .required(false),
             )
-            .arg(
-                Arg::new("install-directory")
-                    .short('d')
-                    .long("install-directory")
-                    .help("Sets the installation directory. Default is the executable's directory.")
-                    .required(false),
-            )
+            // .arg(
+            //     Arg::new("log-dir")
+            //         .short('d')
+            //         .long("log-dir")
+            //         .help("Sets the installation directory. Default is the executable's directory.")
+            //         .required(false),
+            // )
             .get_matches();
-        matches.get_one::<String>("install-directory").map(|s| self.install_dir = PathBuf::from(s));
+        //matches.get_one::<String>("log-dir").map(|s| self.path.install_dir = PathBuf::from(s));
         matches.get_one::<String>("log-level").map(|s| {self.verbosity_level = s.to_string();});
         matches.get_one::<String>("ip").map(|s| {self.net.ip = s.to_string();});
         matches.get_one::<u16>("port").map(|u| {self.net.port = *u;});
+        self
+    }
+    pub fn apply_file(mut self)->Self{
+        let mut cfg = self.path.config_dir.clone();
+        cfg.push("init.d");
+        if let Err(e) = files::from_file_global(&cfg, &mut self)
+        {
+            println!("Failed to read config from {:?} {e}", cfg);
+        }
         self
     }
 }

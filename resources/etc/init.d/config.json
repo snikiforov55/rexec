@@ -1,0 +1,12 @@
+{
+    "verbosity_level": "info",
+    "path":{
+        "log_dir": "${install}/var/log",
+        "config_dir": "${install}/etc"
+    },
+    "net": {
+        "ip": "localhost",
+        "port": 8081,
+        "json_default_limit": "4k"
+    }
+}

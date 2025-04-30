@@ -1,0 +1,10 @@
+{
+"log":{
+    "max_log_files": 5,
+    "log_timestamp": "day"
+},
+"io":{
+  "stdin_capasity": 32,
+  "bcast_capasity": 128
+}
+}
