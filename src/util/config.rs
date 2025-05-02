@@ -3,7 +3,7 @@
  */
 
 mod files;
-use clap::{command, Arg};
+use clap::{command, Arg, ArgMatches};
 use log::error;
 use std::{collections::HashMap, path::PathBuf};
 
@@ -52,14 +52,25 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new() -> Self {
-        let install_dir = std::env::current_exe()
-        .ok()
-        .map(|mut p| {// chop the executable name
-                p.pop();
-                p
-        })
-        .unwrap_or(PathBuf::from("."));
+    pub fn new() -> Self{
+        let cmd_line = Config::command_line_args();
+        let install_dir = cmd_line.get_one::<String>("install-dir").map(|s| PathBuf::from(s));
+        let cmd = Config::default(install_dir);
+
+        cmd
+        .apply_file()
+        .apply_commandline(&cmd_line)
+    }
+    fn default(install_dir : Option<PathBuf>) -> Self {
+        let install_dir = 
+            install_dir.unwrap_or(std::env::current_exe()
+            .ok()
+            .map(|mut p| {// chop the executable name
+                    p.pop();
+                    p
+            })
+            .unwrap_or(PathBuf::from("."))
+        );
 
         Self {
             verbosity_level: "debug".to_string(),
@@ -112,8 +123,9 @@ impl Config {
             },
         }
     }
-    pub fn apply_commandline(mut self) -> Self {
-        let matches = command!("rexec")
+    
+    fn command_line_args()->ArgMatches{
+        command!("rexec")
             .version(clap::crate_version!())
             .author(clap::crate_authors!())
             .about("Allows one to run executables remotely")
@@ -138,21 +150,23 @@ impl Config {
                     .help("Sets the level of verbosity")
                     .required(false),
             )
-            // .arg(
-            //     Arg::new("log-dir")
-            //         .short('d')
-            //         .long("log-dir")
-            //         .help("Sets the installation directory. Default is the executable's directory.")
-            //         .required(false),
-            // )
-            .get_matches();
-        //matches.get_one::<String>("log-dir").map(|s| self.path.install_dir = PathBuf::from(s));
+            .arg(
+                Arg::new("install-dir")
+                    .short('d')
+                    .long("install-dir")
+                    .help("Sets the installation directory. Default is the executable's directory.")
+                    .required(false),
+            )
+            .get_matches()
+    }
+    
+    fn apply_commandline(mut self, matches: &ArgMatches) -> Self {
         matches.get_one::<String>("log-level").map(|s| {self.verbosity_level = s.to_string();});
         matches.get_one::<String>("ip").map(|s| {self.net.ip = s.to_string();});
         matches.get_one::<u16>("port").map(|u| {self.net.port = *u;});
         self
     }
-    pub fn apply_file(mut self)->Self{
+    fn apply_file(mut self)->Self{
         let mut cfg = self.path.config_dir.clone();
         cfg.push("init.d");
         if let Err(e) = files::from_file_global(&cfg, &mut self)

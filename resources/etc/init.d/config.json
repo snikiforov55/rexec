@@ -7,6 +7,6 @@
     "net": {
         "ip": "localhost",
         "port": 8081,
-        "json_default_limit": "4k"
+        "json_default_limit": "4096"
     }
 }
