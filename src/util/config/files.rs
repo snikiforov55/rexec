@@ -88,18 +88,34 @@ pub(super) fn from_file_filesystem(
     Ok(())
 }
 
+pub(super) fn from_file_process(
+    file: &PathBuf,
+    cfg: &mut super::Config,
+) -> Result<(), RexecError> {
+    let mut file = file.clone();
+    file.push("process.json");
+    let content = std::fs::read_to_string(file).map_err(|e| RexecError {
+        code: RexecErrorType::FailedFileRead,
+        message: e.to_string(),
+    })?;
+    cfg.proc = serde_json::from_str(&content)
+    .map_err(|e| RexecError{code: RexecErrorType::FailedFileRead, message: e.to_string()})?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use crate::util::config::{default_chunk_size, default_max_file, default_max_single_chunk, default_metadata_limit, Config};
+    use crate::util::config::{default_chunk_size, default_max_file, default_max_single_chunk, default_metadata_limit, Config, LogTimeStamp, ProcConfig};
 
     #[test]
     fn test_fs_config(){
         let cfg = Config::default(Some(PathBuf::from("/opt/rexec")));
 
         let fs_content = r#"
-    {
+     {
         "entries":{
             "foo": "${install}/var/fs/foo",
             "bar": "${install}/var/fs/baar",
@@ -141,5 +157,21 @@ mod tests {
         assert_eq!(fs.max_file, 90);
         assert_eq!(fs.max_single_chunk, 2048);
         assert_eq!(fs.metadata_limit,800);
+    }
+    #[test]
+    fn test_file_proc_config(){
+        let proc_str = r#"
+        {
+          "max_log_files": 3,
+          "log_timestamp": "Min",
+          "stdin_capacity": 32,
+          "bcast_capacity": 12
+        }
+        "#;
+        let proc: ProcConfig  = serde_json::from_str(&proc_str).unwrap();
+        assert_eq!(proc.bcast_capacity, 12);
+        assert_eq!(proc.log_timestamp, LogTimeStamp::Min);
+        assert_eq!(proc.max_log_files, 3);
+        assert_eq!(proc.stdin_capacity, 32);
     }
 }

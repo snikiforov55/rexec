@@ -41,13 +41,13 @@ struct ChildProc {
 async fn do_start(conf: &Arc<Config>, reg: &RegisterRef, desc: &ProcessDescription) -> Result<(), RexecError> {
     // Register the process as soon as possible to avoid a race
     // condition if two requests are coming at the same time.
-    let fileinfo = FileInfo::next_file(&desc.alias, &conf.path).await?;
+    let fileinfo = FileInfo::next_file(&desc.alias, &conf).await?;
     debug!("filename {:?}", fileinfo.filename);
 
     let (stop_tx, stop_rx) = oneshot::channel::<StopMessage>();
     let (exit_tx, exit_rx) = oneshot::channel::<ExitMessage>();
-    let (stdin_tx, stdin_rx) = mpsc::channel::<String>(conf.io.stdin_capasity);
-    let (bcst_tx, bcst_rx) = broadcast::channel::<String>(conf.io.bcast_capasity);
+    let (stdin_tx, stdin_rx) = mpsc::channel::<String>(conf.proc.stdin_capacity);
+    let (bcst_tx, bcst_rx) = broadcast::channel::<String>(conf.proc.bcast_capacity);
 
     let proc = Process {
         desc: desc.clone(),

@@ -1,5 +1,5 @@
 use crate::error::{RexecError, RexecErrorType};
-use crate::util::config::{LogTimeStamp, PathConfig};
+use crate::util::config::{LogTimeStamp, Config};
 use crate::util::time::{time_stamp_day, time_stamp_hour, time_stamp_min, time_stamp_sec};
 use log::debug;
 use std::cmp::Ordering;
@@ -15,7 +15,7 @@ pub struct FileInfo {
     fd: File,
 }
 impl FileInfo {
-    pub async fn next_file(alias: &String, conf: &PathConfig) -> Result<FileInfo, RexecError> {
+    pub async fn next_file(alias: &String, conf: &Config) -> Result<FileInfo, RexecError> {
         let path = FileInfo::rotate_files(alias, &conf).await?;
         debug!("Log file: {:?}", path);
         let fd = File::options()
@@ -59,9 +59,9 @@ impl FileInfo {
     fn next_filename_day(alias: &String) -> String {
         return format!("{}-utc-{}.log", alias, time_stamp_day());
     }
-    async fn rotate_files(alias: &String, conf: &PathConfig) -> Result<PathBuf, RexecError> {
-        let mut path = conf.install_dir.clone();
-        path.push(&conf.log_dir);
+    async fn rotate_files(alias: &String, conf: &Config) -> Result<PathBuf, RexecError> {
+        let mut path = conf.path.install_dir.clone();
+        path.push(&conf.path.log_dir);
         path.push(alias);
 
         debug!("Log directory: {:?}", path);
@@ -72,11 +72,11 @@ impl FileInfo {
             path.clone(),
             alias.clone(),
             "log".to_string(),
-            conf.max_log_files,
+            conf.proc.max_log_files,
         )
         .await
         .ok();
-        path.push(match conf.log_timestamp {
+        path.push(match conf.proc.log_timestamp {
             LogTimeStamp::Hour => FileInfo::next_filename_hour(alias),
             LogTimeStamp::Min => FileInfo::next_filename_min(alias),
             LogTimeStamp::Sec => FileInfo::next_filename_sec(alias),

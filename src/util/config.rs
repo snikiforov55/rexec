@@ -14,25 +14,42 @@ pub struct NetConfig {
     pub port: u16,
     pub json_default_limit: usize,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub enum LogTimeStamp {
     Sec,
     Min,
     Hour,
     Day,
 }
-#[derive(Clone, Debug)]
-pub struct IoConfig {
-    pub stdin_capasity: usize,
-    pub bcast_capasity: usize,
+#[derive(Clone, Debug, Deserialize)]
+pub struct ProcConfig {
+    #[serde(default = "default_stdin_capacity")]
+    pub stdin_capacity: usize,
+    #[serde(default = "default_bcast_capacity")]
+    pub bcast_capacity: usize,
+    #[serde(default = "default_max_log_files")]
+    pub max_log_files: usize,
+    #[serde(default = "default_log_timestamp")]
+    pub log_timestamp: LogTimeStamp,
+}
+fn default_stdin_capacity()->usize{
+    1024
+}
+fn default_bcast_capacity()->usize{
+    128
+}
+fn default_max_log_files()->usize{
+    5
+}
+fn default_log_timestamp()->LogTimeStamp{
+    LogTimeStamp::Day
 }
 #[derive(Clone, Debug)]
 pub struct PathConfig {
     pub install_dir: PathBuf,
     pub log_dir: PathBuf,
     pub config_dir: PathBuf,
-    pub max_log_files: usize,
-    pub log_timestamp: LogTimeStamp,
+    
 }
 pub type UrlPathMap = HashMap<String, String>;
 #[derive(Clone, Debug, Deserialize)]
@@ -65,7 +82,7 @@ pub struct Config {
     pub verbosity_level: String,
     pub path: PathConfig,
     pub net: NetConfig,
-    pub io: IoConfig,
+    pub proc: ProcConfig,
     pub fs: FsConfig,
 }
 
@@ -110,12 +127,12 @@ impl Config {
                     p
                 },
                 install_dir: install_dir.clone(),
-                max_log_files: 5,
-                log_timestamp: LogTimeStamp::Day,
             },
-            io: IoConfig {
-                stdin_capasity: 32,
-                bcast_capasity: 128,
+            proc: ProcConfig {
+                stdin_capacity: default_stdin_capacity(),
+                bcast_capacity: default_bcast_capacity(),
+                max_log_files: default_max_log_files(),
+                log_timestamp: default_log_timestamp(),
             },
             fs: FsConfig {
                 entries: HashMap::new(),
@@ -174,11 +191,15 @@ impl Config {
         file.push("init.d");
         if let Err(e) = files::from_file_global(&file, &mut self)
         {
-            println!("Failed to read global config from dir {:?} {e}", &file);
+            println!("Failed to read global config from dir {:?}/confg.json {e}", &file);
         }
         if let Err(e) = files::from_file_filesystem(&file, &mut self)
         {
-            println!("Failed to read global config from dir {:?} {e}", &file);
+            println!("Failed to read global config from dir {:?}/filesystem.json {e}", &file);
+        }
+        if let Err(e) = files::from_file_process(&file, &mut self)
+        {
+            println!("Failed to read global config from dir {:?}/process.json {e}", &file);
         }
         self
     }
