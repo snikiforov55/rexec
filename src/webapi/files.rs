@@ -18,21 +18,20 @@ mod save_single;
 pub mod send;
 
 fn sanitize_path(map: &UrlPathMap, url: &String, path: &String) -> Option<PathBuf> {
-    match map.get(url) {
-        None => {
-            debug!("Path alias url {} not found", url);
-            None
-        }
-        Some(dir) => {
-            if path.contains("..") {
-                debug!("Attempting invalid filename {}", path);
-                return None;
-            }
-            let mut d = dir.clone();
-            d.push(path);
-            Some(d)
-        }
+    if path.contains("..") {
+        debug!("Attempting invalid filename {}", path);
+        return None;
     }
+    map.get(url)
+    .map(|dir| {
+        let mut d = PathBuf::from(dir);
+        d.push(path);
+        d
+    })
+    .or_else(||{
+        debug!("Requested path not found {url}");        
+        None
+    })
 }
 struct ContentTypeMultipart;
 

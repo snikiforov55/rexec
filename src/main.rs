@@ -24,7 +24,7 @@ fn main() {
         "trace" => LevelFilter::Trace,
         "debug" => LevelFilter::Debug,
         "info" => LevelFilter::Info,
-        _ => LevelFilter::Trace,
+        _ => LevelFilter::Info,
     };
     CombinedLogger::init(vec![
         TermLogger::new(

@@ -5,6 +5,7 @@
 mod files;
 use clap::{command, Arg, ArgMatches};
 use log::error;
+use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Clone, Debug)]
@@ -33,14 +34,31 @@ pub struct PathConfig {
     pub max_log_files: usize,
     pub log_timestamp: LogTimeStamp,
 }
-pub type UrlPathMap = HashMap<String, PathBuf>;
-#[derive(Clone, Debug)]
+pub type UrlPathMap = HashMap<String, String>;
+#[derive(Clone, Debug, Deserialize)]
 pub struct FsConfig {
+    #[serde(default)]
     pub entries: UrlPathMap,
+    #[serde(default = "default_chunk_size")]
     pub chunk_size: usize,
+    #[serde(default = "default_metadata_limit")]    
     pub metadata_limit: usize,
+    #[serde(default = "default_max_file")]
     pub max_file: usize,
+    #[serde(default = "default_max_single_chunk")]
     pub max_single_chunk: usize,
+}
+fn default_chunk_size()->usize{
+    1000 * 1024
+}
+fn default_metadata_limit()->usize{
+    1024
+}
+fn default_max_file()->usize{
+    8_000_000*1024 // 8Gb by default
+}
+fn default_max_single_chunk()->usize{
+    1000*1024 // All files smaller than this will be sent as one chunk and not streamed.
 }
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -100,26 +118,11 @@ impl Config {
                 bcast_capasity: 128,
             },
             fs: FsConfig {
-                entries: HashMap::from([
-                    ("foo".to_string(), {
-                        let mut foo = install_dir.clone();
-                        foo.push("var");
-                        foo.push("fs");
-                        foo.push("foo");
-                        foo
-                    }),
-                    ("bar".to_string(), {
-                        let mut bar = install_dir.clone();
-                        bar.push("var");
-                        bar.push("fs");
-                        bar.push("bar");
-                        bar
-                    }),
-                ]),
-                chunk_size: 1000 * 1024,
-                metadata_limit: 1024,
-                max_file: 8_000_000*1024, // 8Gb by default
-                max_single_chunk: 1000*1024, // All files smaller than this will be sent as one chunk and not streamed.
+                entries: HashMap::new(),
+                chunk_size: default_chunk_size(),
+                metadata_limit: default_metadata_limit(),
+                max_file: default_max_file(),
+                max_single_chunk: default_max_single_chunk(), 
             },
         }
     }
@@ -146,8 +149,8 @@ impl Config {
             .arg(
                 Arg::new("log-level")
                     .short('v')
-                    .long("verbose")
-                    .help("Sets the level of verbosity")
+                    .long("log-level")
+                    .help("Sets the level of verbosity (info, debug, trace)")
                     .required(false),
             )
             .arg(
@@ -167,11 +170,15 @@ impl Config {
         self
     }
     fn apply_file(mut self)->Self{
-        let mut cfg = self.path.config_dir.clone();
-        cfg.push("init.d");
-        if let Err(e) = files::from_file_global(&cfg, &mut self)
+        let mut file = self.path.config_dir.clone();
+        file.push("init.d");
+        if let Err(e) = files::from_file_global(&file, &mut self)
         {
-            println!("Failed to read config from {:?} {e}", cfg);
+            println!("Failed to read global config from dir {:?} {e}", &file);
+        }
+        if let Err(e) = files::from_file_filesystem(&file, &mut self)
+        {
+            println!("Failed to read global config from dir {:?} {e}", &file);
         }
         self
     }

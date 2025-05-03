@@ -150,7 +150,7 @@ mod tests {
     async fn test_upload_and_override_file() {
         let mut cfg = Config::new();
         let id = uuid::Uuid::new_v4();
-        let dest_path = PathBuf::from(format!("/tmp/rexec/test_{id}"));
+        let dest_path = format!("/tmp/rexec/test_{id}");
         cfg.fs.entries = HashMap::from([("foo".to_string(), dest_path.clone())]);
         let app = test::init_service(
             App::new()
@@ -176,7 +176,7 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let mut file_path = dest_path.clone();
+        let mut file_path = PathBuf::from(dest_path.clone());
         file_path.push(file_name);
         let exists = std::fs::exists(file_path).map_err(|_| ());
         assert_eq!(exists, Ok(true));
