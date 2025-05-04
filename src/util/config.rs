@@ -3,8 +3,7 @@
  */
 
 mod files;
-use clap::{command, Arg, ArgMatches};
-use log::error;
+use pico_args::Arguments;
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 
@@ -88,13 +87,14 @@ pub struct Config {
 
 impl Config {
     pub fn new() -> Self{
-        let cmd_line = Config::command_line_args();
-        let install_dir = cmd_line.get_one::<String>("install-dir").map(|s| PathBuf::from(s));
-        let cmd = Config::default(install_dir);
+        let mut pargs = pico_args::Arguments::from_env();
 
+        let install_dir: Option<PathBuf> = pargs.opt_value_from_str("--install-dir")
+            .unwrap_or(None);
+        let cmd = Config::default(install_dir);
         cmd
         .apply_file()
-        .apply_commandline(&cmd_line)
+        .apply_commandline(pargs)
     }
     fn default(install_dir : Option<PathBuf>) -> Self {
         let install_dir = 
@@ -108,7 +108,7 @@ impl Config {
         );
 
         Self {
-            verbosity_level: "debug".to_string(),
+            verbosity_level: "info".to_string(),
             net: NetConfig {
                 ip: "0.0.0.0".to_string(),
                 port: 8910,
@@ -142,48 +142,12 @@ impl Config {
                 max_single_chunk: default_max_single_chunk(), 
             },
         }
-    }
-    
-    fn command_line_args()->ArgMatches{
-        command!("rexec")
-            .version(clap::crate_version!())
-            .author(clap::crate_authors!())
-            .about("Allows one to run executables remotely")
-            .arg(
-                Arg::new("ip")
-                    .short('i')
-                    .long("ip")
-                    .help("Sets the IP address to bind to.")
-                    .required(false),
-            )
-            .arg(
-                Arg::new("port")
-                    .short('p')
-                    .long("port")
-                    .help("Sets the IP port to bind to.")
-                    .required(false),
-            )
-            .arg(
-                Arg::new("log-level")
-                    .short('v')
-                    .long("log-level")
-                    .help("Sets the level of verbosity (info, debug, trace)")
-                    .required(false),
-            )
-            .arg(
-                Arg::new("install-dir")
-                    .short('d')
-                    .long("install-dir")
-                    .help("Sets the installation directory. Default is the executable's directory.")
-                    .required(false),
-            )
-            .get_matches()
-    }
-    
-    fn apply_commandline(mut self, matches: &ArgMatches) -> Self {
-        matches.get_one::<String>("log-level").map(|s| {self.verbosity_level = s.to_string();});
-        matches.get_one::<String>("ip").map(|s| {self.net.ip = s.to_string();});
-        matches.get_one::<u16>("port").map(|u| {self.net.port = *u;});
+    }    
+    fn apply_commandline(mut self, mut pargs: Arguments) -> Self {
+        pargs.opt_value_from_str("--log-level").unwrap_or(None).map(|s: String| self.verbosity_level = s);
+        pargs.opt_value_from_str("--ip").unwrap_or(None).map(|s: String| self.net.ip = s);
+        pargs.opt_value_from_str("--port").unwrap_or(None).map(|p: u16| self.net.port = p);
+
         self
     }
     fn apply_file(mut self)->Self{
