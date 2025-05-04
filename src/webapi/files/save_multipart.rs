@@ -81,8 +81,8 @@ pub(super) async fn save_file_multipart(conf: &FsConfig,mut mp: Multipart,path: 
         file = f;
         saved_bytes = s;
     }
-    // write content
-    while let Some(field) = mp.try_next().await? {
+    // write content. Only one file content field is expected. following fields are ignored
+    if let Some(field) = mp.try_next().await? {
         let (f,s) = write_chunks(field, file, saved_bytes, conf.max_file).await?;
         file = f;
         saved_bytes = s;
@@ -119,14 +119,14 @@ mod tests {
     fn build_multipart_payload_and_header(
         chunks: Vec<(&str, &str)>,
     ) -> (Vec<u8>, (HeaderName, HeaderValue)) {
-        let boundary = "-----------------------------202022185716362916172375148227";
+        let boundary = "202022185716362916172375148227";
         let mut out: Vec<u8> = vec![];
         out.reserve(1024);
 
         for (name, payload) in chunks {
             out.write_all(
                 format!(
-                    "{boundary}\r\n\
+                    "--{boundary}\r\n\
                 Content-Disposition: form-data; name=\"{name}\"\r\n\
                 Content-Type: text/csv\r\n\
                 \r\n\r\n\
@@ -137,14 +137,19 @@ mod tests {
             )
             .ok();
         }
-        out.write_all(format!("{boundary}--").as_bytes()).ok();
+        out.write_all(format!("--{boundary}--").as_bytes()).ok();
 
         let header = (
             actix_web::http::header::CONTENT_TYPE,
-            HeaderValue::from_static("multipart/form-data; boundary=---------------------------202022185716362916172375148227"),
+            HeaderValue::from_static("multipart/form-data; boundary=202022185716362916172375148227"),
         );
         (out, header)
     }
+
+    // #[test]
+    // async  fn test_dummy(){
+    //     assert!(true);
+    // }
 
     #[actix_web::test]
     async fn test_upload_and_override_file() {
