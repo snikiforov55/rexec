@@ -148,7 +148,7 @@ mod files_tests {
     #[test]
     fn test_futures() {
         let call = async {
-            fn1().and_then(|_| fn2()).await;
+            fn1().and_then(|_| fn2()).await.ok();
         };
 
         tokio::runtime::Runtime::new()
