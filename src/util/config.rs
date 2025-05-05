@@ -12,6 +12,7 @@ pub struct NetConfig {
     pub ip: String,
     pub port: u16,
     pub json_default_limit: usize,
+    pub allowed_cors_domains: String,
 }
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub enum LogTimeStamp {
@@ -113,6 +114,7 @@ impl Config {
                 ip: "0.0.0.0".to_string(),
                 port: 8910,
                 json_default_limit: 4096,
+                allowed_cors_domains: "*".to_string(),
             },
             path: PathConfig {
                 log_dir: {
