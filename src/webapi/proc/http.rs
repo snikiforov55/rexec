@@ -12,7 +12,7 @@ use crate::util::config::Config;
 
 pub(crate) fn configure_http(cfg: &mut web::ServiceConfig){
     cfg.service(
-web::scope("/process")
+web::scope("/proc")
             .service(
         web::resource("")
                     .route(web::get().to(try_get_status_all)),
