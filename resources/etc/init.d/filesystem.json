@@ -1,5 +1,5 @@
-{"map":[
-    {"foo": "${install}/var/fs/foo"},
-    {"bar": "${install}/var/fs/baar"}
-]
+{
+    "entries":{
+        "app": "${install}/var/fs/app"
+    }
 }
