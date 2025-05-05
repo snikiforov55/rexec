@@ -24,7 +24,7 @@ pub(crate) async fn nope() -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
-async fn send_file_stream(mut file: File, chunk_size: usize)->Result<HttpResponse, Error>{
+async fn send_file_stream<CT : ToString>(mut file: File, chunk_size: usize, content_type: CT)->Result<HttpResponse, Error>{
     let file_stream = stream! {
         let mut chunk: Vec<u8> = Vec::with_capacity(chunk_size);
         loop{
@@ -51,24 +51,26 @@ async fn send_file_stream(mut file: File, chunk_size: usize)->Result<HttpRespons
         }
     };
     Ok(HttpResponse::Ok()
-        .content_type(ContentType::octet_stream())
+        .insert_header((header::CONTENT_TYPE, content_type.to_string()))
         .streaming(file_stream))
 }
 
-async fn send_file_chunk(mut file: File, chunk_size: usize)->Result<HttpResponse, Error>{
+async fn send_file_chunk<CT : ToString>(mut file: File, chunk_size: usize, content_type: CT)->Result<HttpResponse, Error>{
     let (ch, size) = web::block(move || {
         let mut chunk: Vec<u8> = Vec::with_capacity(chunk_size);
         file.read_to_end(&mut chunk).map(|s| (chunk, s))
     }).await??;
 
     Ok(HttpResponse::Ok()
-        .content_type(ContentType::html())
+        .insert_header((header::CONTENT_TYPE, content_type.to_string()))
         .body(ch[..size].to_vec())
     )
 }
 
 pub(super) async fn send_file(conf: &FsConfig, path: PathBuf) -> HttpResponse {
     debug!("Reading file: {:?}",&path);
+    let ct = mime_guess::from_path(&path).first_or_octet_stream();
+    
     let (file, size) = match web::block(move || 
         File::open(path)
         .and_then(|f| 
@@ -90,8 +92,10 @@ pub(super) async fn send_file(conf: &FsConfig, path: PathBuf) -> HttpResponse {
         }
         Ok(Ok(f)) => f,
     };
-    let out = if size > conf.max_single_chunk {send_file_stream(file, conf.chunk_size).await}
-                                           else {send_file_chunk(file, conf.chunk_size).await};
+    
+
+    let out = if size > conf.max_single_chunk {send_file_stream(file, conf.chunk_size,ct).await}
+                                           else {send_file_chunk(file, conf.chunk_size, ct).await};
     match out{
         Ok(res) => res,
         Err(e) => {
