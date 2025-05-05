@@ -26,8 +26,10 @@ pub(crate) async fn nope() -> HttpResponse {
 
 async fn send_file_stream(mut file: File, chunk_size: usize)->Result<HttpResponse, Error>{
     let file_stream = stream! {
-        let mut chunk = vec![0u8;chunk_size];
+        let mut chunk: Vec<u8> = Vec::with_capacity(chunk_size);
         loop{
+            chunk.clear();
+
             match web::block(move || file.read(&mut chunk).map(|n| (file, n, chunk))).await{
             Err(e) => {
                 error!("Error executing web::block: {}", e);
@@ -55,12 +57,12 @@ async fn send_file_stream(mut file: File, chunk_size: usize)->Result<HttpRespons
 
 async fn send_file_chunk(mut file: File, chunk_size: usize)->Result<HttpResponse, Error>{
     let (ch, size) = web::block(move || {
-        let mut chunk = vec![0u8;chunk_size];
+        let mut chunk: Vec<u8> = Vec::with_capacity(chunk_size);
         file.read_to_end(&mut chunk).map(|s| (chunk, s))
     }).await??;
 
     Ok(HttpResponse::Ok()
-        .content_type(ContentType::json())
+        .content_type(ContentType::html())
         .body(ch[..size].to_vec())
     )
 }
