@@ -1,26 +1,69 @@
 <!DOCTYPE HTML>
 <html>
 <head>
+<!-- <meta name="color-scheme" content="light dark"/> -->
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-
+    @media (prefers-color-scheme: light) {
+        :root{
+            --color-bg0: #A7A7A7;
+            --color-bg1: #AAAAAA;
+            --color-bg2: #ADADAD;
+            --text-color: #2F2F2F;
+        }
+    }
+    @media (prefers-color-scheme: dark) {
+        :root{
+            /*--color-bg0: "#040404";*/
+            --color-bg0: #1F1F1F;
+            --color-bg1: #2B2B2B;
+            --color-bg2: #2F2F2F;
+            --text-color: #D7D7D7;
+        }
+    }
+    * {
+        box-sizing: border-box; 
+        color: var(--text-color);
+        font-family: Verdana, Geneva, Tahoma, sans-serif;
+    }
+    html,
+    body{
+        width: 100vw;
+        height: 100vh;
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        background-color: var(--color-bg0);
+    }
+    .level-zero{
+        background-color: var(--color-bg0);
+    }
+    .level-one{
+        background-color: var(--color-bg1);
+    }
+    .level-two{
+        background-color: var(--color-bg1);
+    }
 </style>
 </head>
 <body>
-<div style="display:flex; flex:auto; height: 100vw; flex-direction: column;">
-    <div style="display:flex; flex:none">config.name config.version</div>
+<div class="level-zero" style="display:flex; padding:1em; flex:auto; height: 100%; width:100%; flex-direction: column;" >
+    <div style="margin: 0.5em; display:flex; flex:none;" id="info" >
+    </div>
     <div style="display:flex; flex:auto; flex-direction: row;">
-        <div style="display:flex; flex:none; flex-direction: column; flex-shrink: 1;width: fit-content;">
-            <div style="flex:none">Processes</div>
+        <div  style="min-width: 200px; margin-right: 0.5em; display:flex; flex:none; flex-direction: column; flex-shrink: 1;width: fit-content;">
+            <div style="margin:0.5em; flex:none; user-select: none;" onclick="fetch_all_processes()">Processes</div>
             <div 
-                style="margin-left: 0.2em; display:flex; flex-direction: column;"
+                style="margin-left: 0.5em; display:flex; flex-direction: column; gap: 0.2em;"
                 id="procs"
             >
-            procs
             </div>
         </div>
-        <div style="display:flex; flex:auto; flex-direction: column; width: fit-content">
-            <div style="flex: none;" id="proc_details_alias">Details</div>
-            <div style="display:flex; flex:auto; flex-grow: initial;" id="proc_details">
+        <div 
+            style="margin-left: 0.5em; display:flex; flex:auto; flex-direction: column; width: fit-content">
+            <div style="margin:0.5em; flex: none;" id="proc_details_alias">Details</div>
+            <div class="level-one"  
+                style="margin-left: 0.5em; display:flex; flex:auto; flex-grow: initial;" id="proc_details">
                 something
             </div>
         </div>
@@ -31,13 +74,37 @@
         name: "rexec",
         version: "2.0.0"
     };
-    const proc_list = [];
+    const info = document.getElementById("info");
+    const procs_view = document.getElementById("procs");
+    const proc_details_view = document.getElementById("proc_details");
+
+    let proc_list = [];
     var proc_selection = undefined;
 
+    window.addEventListener('load', async () => {
+        info.innerHTML=`<div> ${config.name} ${config.version}</div>`
+        fetch_all_processes();
+    });
+
     async function fetch_all_processes() {
-        
+        event.preventDefault();
+        await fetch("/proc")
+            .then((res) => res.json() )
+            .then((json) => {
+                proc_list = json;
+                update_process_view();
+            })
+            .catch((e)=> console.log(e))
+
+        console.log(proc_list)
     }
-    function create_process_view(){
+    function update_process_view(){
+        procs_view.innerHTML = proc_list.map((p)=>`
+            <div class="level-one" style="margin-left: 0.5em; padding:0.3em; user-select: none;">
+                ${p.alias}
+            </div>
+        `)
+        .join('')
 
     }
     function create_details_view(){
