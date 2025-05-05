@@ -134,6 +134,13 @@ The request is equal to: `sh -c "ls -rtl"`
 }
 ```
 
+## File upload
+
+### Single chunk POST request
+
+### Multipart form request
+
+
 ## Http Return codes
 ### 500 Internal Server Error
 Is returned if any internal error occur in the executor code itself.
