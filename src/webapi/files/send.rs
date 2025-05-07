@@ -1,10 +1,10 @@
 
 use actix_web::{
-    Error, http::{header::{self, ContentType}}, web::{self, Bytes}, HttpResponse
+    Error, http::header, web::{self, Bytes}, HttpResponse
 };
 use async_stream::stream;
 use log::{debug, error};
-use std::{convert::TryInto, fs::File, io::{Read, Seek}, path::PathBuf};
+use std::{convert::TryInto, fs::File, io::Read, path::PathBuf};
 
 use crate::{
     error::{RexecError, RexecErrorType},
