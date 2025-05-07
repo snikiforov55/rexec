@@ -28,6 +28,7 @@
         box-sizing: border-box; 
         color: var(--text-color);
         font-family: Verdana, Geneva, Tahoma, sans-serif;
+        user-select: none; 
     }
     html,
     body{
@@ -51,14 +52,14 @@
 </style>
 </head>
 <body>
-<div class="level-zero" style="user-select: none; display:flex; padding:1em; flex:auto; height: 100%; width:100%; flex-direction: column;" >
-    <div style="margin: 0.5em; display:flex; flex:none;" id="info" >
+<div class="level-zero" style="display:flex; padding:1rem; flex:auto; height: 100%; width:100%; flex-direction: column;" >
+    <div style="margin: 0.5rem; display:flex; flex:none; justify-content:right; font-size: smaller; font-style: italic;" id="info" >
     </div>
     <div style="display:flex; flex:auto; flex-direction: row;">
-        <div  style="min-width: 16em; margin-right: 0.5em; display:flex; flex:none; flex-direction: column; flex-shrink: 1;width: fit-content;">
+        <div  style="min-width: 18rem; margin-right: 0.5rem; display:flex; flex:none; flex-direction: column; flex-shrink: 1;width: fit-content;">
             <div style="margin:0.5em; display: flex; flex:none; flex-direction: row; align-items: center;">
-            <div style="flex:none;" >Processes</div>
-            <div style="color: var(--text-color); margin-left: 0.5em; height:1.0em; width:1.0em;" onclick="fetch_all_processes()">
+            <div style="flex:auto;" >Processes</div>
+            <div style="color: var(--text-color); margin-left: 0.5rem; height:1.0rem; width:1.0rem;" onclick="fetch_all_processes()">
                 <svg version="1.1" id="Capa_1" viewBox="0 0 492.883 492.883" xml:space="preserve" fill="currentColor">
                     <g id="SVGRepo_bgCarrier" stroke-width="0"></g>
                     <g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
@@ -75,7 +76,7 @@
             </div>
         </div>
         <div 
-            style="margin-left: 0.5em; display:flex; flex:auto; flex-direction: column; width: fit-content">
+            style="margin-left: 0.5em; display:flex; flex:auto; flex-direction: column; width: fit-content; border-radius: 0.25em;">
             <div style="margin:0.5em; flex: none;" id="proc_details_alias">Details</div>
             <div class="level-one"  
                 style="margin-left: 0.5em; display:flex; flex:auto; flex-grow: initial;" id="proc_details">
@@ -97,7 +98,7 @@
     var proc_selection = undefined;
 
     window.addEventListener('load', async () => {
-        info.innerHTML=`<div> ${config.name} ${config.version}</div>`
+        info.innerHTML=`<div style="flex:none;"> ${config.name} ${config.version}</div>`
         fetch_all_processes();
     });
 
@@ -122,11 +123,12 @@
         })
         .map((p)=>`
         <div 
-        class="level-one" 
-        style="font-weight: bolder; margin-left: 0.5em; padding:0.5em; user-select: none; display: flex; flex-direction: row">
-        <div style="flex:auto;">${p.alias}</div>
-        <div style="flex:none; color:#FF0000; height:1em; width:1em;">
-        <svg  version="1.1" id="Capa_1" viewBox="0 0 10.334 10.334" xml:space="preserve" fill="currentColor">
+        id="proc-${p.alias}"
+        style="font-weight: bolder; margin-left: 0.5em; align-items:center; padding:0.5em; display: flex; flex-direction: row">
+        <div style="flex:none;background-color:green;width:0.4rem;height: 1.0rem;border-radius: 0.2rem;margin-right:0.4rem"></div>
+        <div style="flex:auto; font-size:larger">${p.alias}</div>
+        <div style="flex:none; color:#FF0000; height:1em; width:1em;" onclick="stop_process('${p.alias}')">
+        <svg  version="1.1" id="Capa_1" viewBox="0 0 10.334 10.334" xml:space="preserve" fill="firebrick">
             <g id="SVGRepo_bgCarrier" stroke-width="0"></g>
             <g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
             <g id="SVGRepo_iconCarrier"> <g> 
@@ -145,6 +147,20 @@
     }
     function append_process_stdout(){
 
+    }
+    async function stop_process(name){
+        const p=proc_list.find((p)=> p.alias === name);
+        if(p){
+            await fetch(`/proc/${p.alias}`,{method: "DELETE"})
+            .then((res)=> {
+                if(res.ok){
+                    proc_list = proc_list.filter((v) => v.alias !== name);
+                    const pv = document.getElementById(`proc-${name}`);
+                    if(pv){ procs_view.removeChild(pv);}
+                }
+            })
+            .catch((e)=>console.log(e))
+        }
     }
 </script>
 </body>
