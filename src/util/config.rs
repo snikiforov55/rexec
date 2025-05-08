@@ -13,6 +13,8 @@ pub struct NetConfig {
     pub port: u16,
     pub json_default_limit: usize,
     pub allowed_cors_domains: String,
+    pub response_timeout: u64,
+
 }
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub enum LogTimeStamp {
@@ -31,6 +33,8 @@ pub struct ProcConfig {
     pub max_log_files: usize,
     #[serde(default = "default_log_timestamp")]
     pub log_timestamp: LogTimeStamp,
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
 }
 fn default_stdin_capacity()->usize{
     1024
@@ -43,6 +47,9 @@ fn default_max_log_files()->usize{
 }
 fn default_log_timestamp()->LogTimeStamp{
     LogTimeStamp::Day
+}
+fn default_timeout() -> u64{
+    5
 }
 #[derive(Clone, Debug)]
 pub struct PathConfig {
@@ -115,6 +122,7 @@ impl Config {
                 port: 8910,
                 json_default_limit: 4096,
                 allowed_cors_domains: "*".to_string(),
+                response_timeout: 25,
             },
             path: PathConfig {
                 log_dir: {
@@ -135,6 +143,7 @@ impl Config {
                 bcast_capacity: default_bcast_capacity(),
                 max_log_files: default_max_log_files(),
                 log_timestamp: default_log_timestamp(),
+                timeout: default_timeout(),
             },
             fs: FsConfig {
                 entries: HashMap::new(),
