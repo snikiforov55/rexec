@@ -59,6 +59,7 @@ pub(super) async fn try_create_process(
 }
 
 pub(super) async fn try_stop_process(
+    conf: Data<Arc<Config>>,
     reg: Data<RegisterRef>,
     alias: web::Path<String>,
 ) -> HttpResponse {
@@ -73,6 +74,7 @@ pub(super) async fn try_stop_process(
         None => (None, None),
     };
     stop_tx.map(|tx| tx.send(StopMessage {}).ok());
+    let timeout = conf.get_ref().net.response_timeout;
     match exit_rx {
         Some(rx) => {
             tokio::select! {
@@ -80,7 +82,7 @@ pub(super) async fn try_stop_process(
                     debug!("Confirmed process exit via the exit channel");
                     HttpResponse::Ok().body(())
                 },
-                _ = tokio::time::sleep(Duration::from_secs(25)) => {
+                _ = tokio::time::sleep(Duration::from_secs(timeout)) => {
                     debug!("Timeout waiting for the process to exit");
                     HttpResponse::RequestTimeout().body(())
                 }
