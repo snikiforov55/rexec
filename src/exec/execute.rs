@@ -49,6 +49,8 @@ async fn do_start(
     reg: &RegisterRef,
     desc: &ProcessDescription,
 ) -> Result<(), RexecError> {
+    // TODO
+    // ------------- Implement atomic check_and_add. -----------------------
     // Register the process as soon as possible to avoid a race
     // condition if two requests are coming at the same time.
     let fileinfo = FileInfo::next_file(&desc.alias, &conf).await?;
@@ -69,6 +71,7 @@ async fn do_start(
         stdin_tx,
     };
     reg.write().await.add(proc);
+    // -------------- to be atomic operation ---------------
 
     let child_res = Command::new(&desc.cmd)
         .stdout(Stdio::piped())
